@@ -37,6 +37,29 @@ tus aplicaciones ──OTLP──▶ OpenTelemetry Collector ──▶ ClickHous
 Una aplicación se identifica por el atributo de recurso estándar **`service.namespace`**. Nada en Zabbix ni en estos
 módulos es específico de una aplicación: para una nueva bastan las variables `OTEL_*` y un comando.
 
+## Pruébalo en 5 minutos (laboratorio)
+
+Todo en Docker en tu máquina (Zabbix 8.0, ClickHouse, un collector, los módulos y un servicio Go instrumentado), para
+verlo funcionar antes de tocar tu Zabbix: [docs/lab.es.md](docs/lab.es.md).
+
+```sh
+cd examples/lab && cp .env.example .env && docker compose up -d --build && python3 ../../scripts/lab-bootstrap.py
+```
+
+## Haz fork y replícalo
+
+Nada en el código está atado a una instalación: las aplicaciones se identifican por `service.namespace`, los endpoints y
+las credenciales son variables, y el template se genera a partir del propio de Zabbix. En un fork:
+
+1. Ejecuta el [laboratorio](docs/lab.es.md) para comprobar tus cambios (`php tests/run.php` y la CI hacen el resto).
+2. Instala en tu Zabbix: [installation.es.md](docs/installation.es.md); los módulos, paso a paso con capturas, en
+   [install-module.es.md](docs/install-module.es.md).
+3. Conecta tus aplicaciones: [add-application.es.md](docs/add-application.es.md) y [examples/stacks](examples/stacks).
+
+Opcional: los enlaces de las páginas del módulo y de los manifests apuntan a este repositorio (`OverviewHtml::DOCS_URL`
+en `modules/ApmOverview/includes/OverviewHtml.php` y `url` en `modules/*/manifest.json`). Cámbialos a tu fork si publicas
+tu propia documentación.
+
 ## Inicio rápido
 
 1. **Instala una vez por Zabbix** ClickHouse, el collector, la fuente de datos, los módulos y el template:
@@ -78,7 +101,9 @@ Más: [experiencia del usuario](docs/screenshots/user-experience.png), [origen d
 
 | Guía | |
 |---|---|
+| [lab.es.md](docs/lab.es.md) | Todo en Docker en tu máquina, en 5 minutos |
 | [installation.es.md](docs/installation.es.md) | Una vez por Zabbix, paso a paso, con una comprobación por paso y una prueba de humo |
+| [install-module.es.md](docs/install-module.es.md) | Los módulos en Zabbix, pantalla a pantalla |
 | [add-application.es.md](docs/add-application.es.md) | Cada aplicación: instrumentar, llegar al collector, host en Zabbix, verificar |
 | [apm-template.es.md](docs/apm-template.es.md) | El template APM: items, triggers, macros, ajuste y actualizaciones |
 | [verification.es.md](docs/verification.es.md) | Qué se probó y cómo repetirlo |

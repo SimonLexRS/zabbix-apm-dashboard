@@ -1,0 +1,68 @@
+# OpenTelemetry Collector of the lab (compose.yaml): the same as examples/otelcol-config.yaml, writing to the ClickHouse
+# container with the credentials of .env.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  batch:
+    timeout: 5s
+  # Privacy: client IPs of real users are stored only as a hash (still countable, never readable).
+  attributes/privacy:
+    actions:
+      - key: client.address
+        action: hash
+      - key: network.peer.address
+        action: hash
+      - key: net.peer.ip
+        action: hash
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000?dial_timeout=10s
+    database: zabbix
+    username: ${env:CLICKHOUSE_USER}
+    password: ${env:CLICKHOUSE_PASSWORD}
+    create_schema: true # creates zabbix.otel_traces, otel_logs and otel_metrics_* on first start
+    ttl: 72h            # how long telemetry is kept
+    timeout: 10s
+    traces_table_name: otel_traces
+    logs_table_name: otel_logs
+    metrics_tables:
+      gauge:
+        name: otel_metrics_gauge
+      sum:
+        name: otel_metrics_sum
+      histogram:
+        name: otel_metrics_histogram
+      exponential_histogram:
+        # Zabbix expects this name (the exporter default is otel_metrics_exp_histogram).
+        name: otel_metrics_exponential_histogram
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/privacy, batch]
+      exporters: [clickhouse]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [clickhouse]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [clickhouse]

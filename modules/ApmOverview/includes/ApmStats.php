@@ -98,7 +98,7 @@ class ApmStats {
 			' ORDER BY app=\'\', app';
 
 		return array_map(static fn(array $row): string => (string) $row['app'],
-			iterator_to_array($this->db->fetch($sql, ['seconds' => ['UInt32', $seconds]]), false)
+			self::rows($this->db, $sql, ['seconds' => ['UInt32', $seconds]])
 		);
 	}
 
@@ -114,7 +114,7 @@ class ApmStats {
 	}
 
 	public function getServerVersion(): string {
-		return (string) ($this->db->fetch('SELECT version() AS version')->current()['version'] ?? '');
+		return (string) (self::rows($this->db, 'SELECT version() AS version')[0]['version'] ?? '');
 	}
 
 	/**
@@ -129,9 +129,7 @@ class ApmStats {
 			' LIMIT '.$limit;
 
 		return array_map(static fn(array $row): string => (string) $row['service'],
-			iterator_to_array(
-				$this->db->fetch($sql, ['seconds' => ['UInt32', $seconds]] + $this->applicationParams()), false
-			)
+			self::rows($this->db, $sql, ['seconds' => ['UInt32', $seconds]] + $this->applicationParams())
 		);
 	}
 
@@ -157,7 +155,7 @@ class ApmStats {
 				$this->whereApplication($query);
 
 				try {
-					$row = $this->db->fetch($query->getSql(), $query->getParams())->current();
+					$row = self::rows($this->db, $query->getSql(), $query->getParams())[0] ?? ['rows' => 0, 'last' => null];
 				}
 				catch (\DBException $e) {
 					$result[$signal]['error'] = $e->getMessage();
@@ -212,7 +210,7 @@ class ApmStats {
 		$minutes = max(1, ($time_till - $time_from) / SEC_PER_MIN);
 		$services = [];
 
-		foreach ($this->db->fetch($query->getSql(), $query->getParams()) as $row) {
+		foreach (self::rows($this->db, $query->getSql(), $query->getParams()) as $row) {
 			$services[] = ['service' => $row['service']] + self::makeRedRow($row, $minutes);
 		}
 
@@ -260,7 +258,7 @@ class ApmStats {
 		$empty = array_fill_keys($buckets, 0);
 		$series = [];
 
-		foreach ($this->db->fetch($query->getSql(), $query->getParams()) as $row) {
+		foreach (self::rows($this->db, $query->getSql(), $query->getParams()) as $row) {
 			$bucket = (int) $row['bucket'];
 
 			if (!array_key_exists($bucket, $empty)) {
@@ -331,7 +329,7 @@ class ApmStats {
 		$minutes = max(1, ($time_till - $time_from) / SEC_PER_MIN);
 		$endpoints = [];
 
-		foreach ($this->db->fetch($query->getSql(), $query->getParams()) as $row) {
+		foreach (self::rows($this->db, $query->getSql(), $query->getParams()) as $row) {
 			$endpoints[] = [
 				'service' => $row['service'],
 				'endpoint' => $row['endpoint'],
@@ -541,7 +539,7 @@ class ApmStats {
 			'traceids' => ['String', array_keys($traces)]
 		];
 
-		foreach ($this->db->fetch($sql, $params) as $row) {
+		foreach (self::rows($this->db, $sql, $params) as $row) {
 			$trace = &$traces[$row['traceid']];
 			$trace['span_count'] = (int) $row['span_count'];
 
@@ -813,14 +811,39 @@ class ApmStats {
 	 * Run a query with the {time_from}, {time_till} and, when filtered, {service} parameters.
 	 */
 	private function fetch(string $sql, int $time_from, int $time_till, string $service = '',
-			array $params = []): \Generator {
+			array $params = []): array {
 		$params += ['time_from' => ['Int32', $time_from], 'time_till' => ['Int32', $time_till]];
 
 		if ($service !== '') {
 			$params['service'] = ['String', self::toLikePattern($service)];
 		}
 
-		return $this->db->fetch($sql, $params + $this->applicationParams());
+		return self::rows($this->db, $sql, $params + $this->applicationParams());
+	}
+
+	/**
+	 * All the rows of a query, read inside a window that hides one notice of the Zabbix frontend itself: its ClickHouse
+	 * client (ApmDbClickHouse) calls curl_close(), deprecated since PHP 8.5 and without effect since PHP 8.0. Only that
+	 * E_DEPRECATED is dropped; any other error goes to the Zabbix handler as usual. The rows are read completely here
+	 * because the client closes the connection in the finally block of its generator.
+	 */
+	private static function rows(ApmDbClickHouse $db, string $sql, array $params = []): array {
+		$previous = set_error_handler(
+			static function (int $errno, string $errstr, string $errfile = '', int $errline = 0) use (&$previous): bool {
+				if ($errno === E_DEPRECATED && str_ends_with($errfile, 'ApmDbClickHouse.php')) {
+					return true;
+				}
+
+				return $previous !== null ? (bool) $previous($errno, $errstr, $errfile, $errline) : false;
+			}
+		);
+
+		try {
+			return iterator_to_array($db->fetch($sql, $params), false);
+		}
+		finally {
+			restore_error_handler();
+		}
 	}
 
 	/**

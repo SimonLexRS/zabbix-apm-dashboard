@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that an application is monitored end to end by "OpenTelemetry application by OTLP".
 
-  export ZABBIX_URL=http://zabbix.example.com/zabbix ZABBIX_API_TOKEN=...
+  export ZABBIX_URL=http://zabbix.example.com/zabbix ZABBIX_API_TOKEN=...   # or ZABBIX_USER and ZABBIX_PASSWORD
   export CH_URL=http://127.0.0.1:8123 CH_USER=reader CH_PASSWORD=...   # optional: compare with ClickHouse
   python3 scripts/verify-app.py opentelemetry-demo
 
@@ -38,8 +38,12 @@ def report(ok: bool, text: str) -> None:
 
 def zabbix(url: str, token: str, method: str, params):
     body = json.dumps({'jsonrpc': '2.0', 'method': method, 'params': params, 'id': 1}).encode()
-    request = urllib.request.Request(url.rstrip('/') + '/api_jsonrpc.php', body,
-        {'Content-Type': 'application/json-rpc', 'Authorization': 'Bearer ' + token})
+    headers = {'Content-Type': 'application/json-rpc'}
+
+    if token:
+        headers['Authorization'] = 'Bearer ' + token
+
+    request = urllib.request.Request(url.rstrip('/') + '/api_jsonrpc.php', body, headers)
     with urllib.request.urlopen(request, timeout=60) as response:
         result = json.load(response)
     if 'error' in result:
@@ -58,6 +62,16 @@ def clickhouse(sql: str, params: dict) -> list:
         return json.load(response)['data']
 
 
+def macro_seconds(host_macros: list, name: str, default: int) -> int:
+    """{$OTLP.<name>:traces} (or without context) from the host, in seconds; otherwise the template default."""
+    values = {m['macro'].replace('"', ''): m['value'] for m in host_macros}
+    value = values.get(f'{{$OTLP.{name}:traces}}') or values.get(f'{{$OTLP.{name}}}')
+    if not value:
+        return default
+    unit = {'s': 1, 'm': 60, 'h': 3600}.get(value[-1])
+    return int(value[:-1]) * unit if unit else int(value)
+
+
 def close(a: float, b: float) -> bool:
     return abs(a - b) <= TOLERANCE * max(abs(a), abs(b), 1e-9)
 
@@ -68,8 +82,11 @@ def main() -> int:
     args = parser.parse_args()
 
     url, token = os.environ.get('ZABBIX_URL'), os.environ.get('ZABBIX_API_TOKEN')
-    if not url or not token:
-        parser.error('set ZABBIX_URL and ZABBIX_API_TOKEN')
+    user, password = os.environ.get('ZABBIX_USER'), os.environ.get('ZABBIX_PASSWORD')
+    if not url or not (token or (user and password)):
+        parser.error('set ZABBIX_URL and ZABBIX_API_TOKEN (or ZABBIX_USER and ZABBIX_PASSWORD)')
+    if not token:
+        token = zabbix(url, '', 'user.login', {'username': user, 'password': password})
 
     api = lambda method, params: zabbix(url, token, method, params)
     host_name = 'apm-' + re.sub(r'[^0-9A-Za-z._ -]', '-', args.namespace)
@@ -96,64 +113,72 @@ def main() -> int:
     report(bool(ages) and min(ages) < HEARTBEAT + 300,
         f'span items receive values (newest {min(ages) if ages else "never"} s ago, heartbeat {HEARTBEAT} s)')
 
-    # Minutes compared: the last WINDOW_MIN complete minutes, by the minute each Zabbix value measures.
-    end = now // 60 * 60
-    start = end - WINDOW_MIN * 60
+    # Each value covers the GRANULARITY seconds that end TIMESHIFT seconds before it was collected.
+    granularity, shift, frequency = (macro_seconds(host['macros'], name, default)
+        for name, default in (('GRANULARITY', 60), ('TIMESHIFT', 10), ('FREQUENCY', 60)))
+    start, end = now - WINDOW_MIN * 60, now
 
     def history(key: str) -> dict:
-        """{measured minute: value}. A value collected at minute T measures minute T-1 (granularity 1m, time shift
-        10s). Unchanged values are discarded by the template, so the last stored value is carried forward."""
+        """{collection time: value} for every collection in the window. Unchanged values are discarded by the
+        template, so the last stored value is carried forward to the collections that stored nothing."""
         item = items[key]
         rows = api('history.get', {'itemids': item['itemid'], 'history': int(item['value_type']),
             'time_from': start - HEARTBEAT, 'time_till': end, 'output': ['clock', 'value'], 'sortfield': 'clock'})
+        if not rows:
+            return {}
+        phase = int(rows[-1]['clock']) % frequency
         series, last, i = {}, None, 0
-        for minute in range(start, end, 60):
-            while i < len(rows) and int(rows[i]['clock']) < minute + 60:
-                last = float(rows[i]['value'])
+        for slot in range(start - start % frequency + phase - frequency, end, frequency):
+            collected = slot
+            while i < len(rows) and int(rows[i]['clock']) < slot + frequency // 2:
+                last, collected = float(rows[i]['value']), int(rows[i]['clock'])
                 i += 1
-            if last is not None:
-                series[minute - 60] = last
+            if last is not None and collected >= start:
+                series[collected] = last
         return series
 
     if not os.environ.get('CH_URL'):
         print('---- set CH_URL (and CH_USER/CH_PASSWORD) to compare with ClickHouse')
         return 1 if failures else 0
 
-    # The same minutes in ClickHouse, for this namespace and for all applications.
+    # The same seconds in ClickHouse, for this namespace and for all applications.
     rows = clickhouse(
-        'SELECT toUnixTimestamp(toStartOfMinute(Timestamp)) AS minute, StatusCode AS status,'
+        'SELECT toUnixTimestamp(Timestamp) AS second, StatusCode AS status,'
         ' countIf(ResourceAttributes[\'service.namespace\']={ns:String}) AS app,'
         ' count() AS total,'
-        ' avgIf(Duration, ResourceAttributes[\'service.namespace\']={ns:String}) / 1e9 AS app_avg_s'
+        ' sumIf(Duration, ResourceAttributes[\'service.namespace\']={ns:String}) / 1e9 AS app_s'
         ' FROM otel_traces'
         ' WHERE Timestamp >= toDateTime({from:UInt32}) AND Timestamp < toDateTime({till:UInt32})'
-        ' GROUP BY minute, status',
-        {'ns': args.namespace, 'from': start - 60, 'till': end - 60})
-    clickhouse_minutes = {(int(r['minute']), r['status']): r for r in rows}
+        ' GROUP BY second, status',
+        {'ns': args.namespace, 'from': start - granularity - shift - frequency, 'till': end})
+    seconds = {(int(r['second']), r['status']): r for r in rows}
     mean = lambda values: sum(values) / len(values) if values else 0.0
+
+    def window(collected: int, status: str) -> dict:
+        """ClickHouse totals over the seconds that the value collected at that time covers."""
+        found = [seconds.get((s, status), {}) for s in range(collected - shift - granularity, collected - shift)]
+        return {k: sum(float(r.get(k, 0)) for r in found) for k in ('app', 'total', 'app_s')}
 
     for status, key in (('Ok', 'otlp.span.status.ok'), ('Error', 'otlp.span.status.error'),
             ('Unset', 'otlp.span.status.unset')):
         counts = history(key)
-        minutes = sorted(counts)
-        if not minutes:
+        if not counts:
             report(False, f'{status:<5} no values in the last {WINDOW_MIN} minutes')
             continue
 
-        ch = [clickhouse_minutes.get((m, status), {}) for m in minutes]
-        zabbix_avg = mean([counts[m] for m in minutes])
-        app = mean([float(r.get('app', 0)) for r in ch])
-        total = mean([float(r.get('total', 0)) for r in ch])
-        report(close(zabbix_avg, app), f'{status:<5} spans/min over {len(minutes)} min: Zabbix {zabbix_avg:,.1f}, '
-            f'ClickHouse {app:,.1f} for {args.namespace} ({total:,.1f} all applications)')
+        ch = [window(t, status) for t in counts]
+        zabbix_avg = mean(list(counts.values()))
+        app = mean([w['app'] for w in ch])
+        total = mean([w['total'] for w in ch])
+        report(close(zabbix_avg, app), f'{status:<5} spans per {granularity} s, {len(counts)} values: '
+            f'Zabbix {zabbix_avg:,.1f}, ClickHouse {app:,.1f} for {args.namespace} ({total:,.1f} all applications)')
 
         if total > app * (1 + TOLERANCE) and app > 0:
             report(not close(zabbix_avg, total), f'{status:<5} filtered by namespace (not the total of all applications)')
 
-        # Average duration: the mean of the per-minute averages, as the item reports one average per minute.
-        durations = history(key + '.duration')
-        both = [(durations[m], float(r['app_avg_s'])) for m, r in zip(minutes, ch)
-            if m in durations and float(r.get('app', 0)) > 0]
+        # Average duration: the mean of the per-value averages, as the item reports one average per collection.
+        both = [(d, w['app_s'] / w['app']) for t, d in history(key + '.duration').items()
+            for w in [window(t, status)] if w['app'] > 0]
         if both:
             zabbix_s, ch_s = mean([d for d, _ in both]), mean([c for _, c in both])
             report(close(zabbix_s, ch_s),

@@ -35,6 +35,29 @@ your applications ──OTLP──▶ OpenTelemetry Collector ──▶ ClickHou
 An application is identified by the standard resource attribute **`service.namespace`**. Nothing in Zabbix or in these
 modules is specific to one application: a new one needs the `OTEL_*` variables and one command.
 
+## Try it in 5 minutes (lab)
+
+Everything in Docker on your machine — Zabbix 8.0, ClickHouse, a collector, the modules and an instrumented Go
+service — to see it working before touching your Zabbix: [docs/lab.md](docs/lab.md).
+
+```sh
+cd examples/lab && cp .env.example .env && docker compose up -d --build && python3 ../../scripts/lab-bootstrap.py
+```
+
+## Fork it and replicate it
+
+Nothing in the code is tied to one installation: applications are identified by `service.namespace`, the endpoints and
+credentials are variables, and the template is generated from Zabbix's own. In a fork:
+
+1. Run the [lab](docs/lab.md) to check your changes (`php tests/run.php` and the CI run the rest).
+2. Install in your Zabbix: [installation.md](docs/installation.md), modules step by step with screenshots in
+   [install-module.md](docs/install-module.md).
+3. Connect your applications: [add-application.md](docs/add-application.md) and [examples/stacks](examples/stacks).
+
+Optional: the links of the module pages and manifests point to this repository (`OverviewHtml::DOCS_URL` in
+`modules/ApmOverview/includes/OverviewHtml.php` and `url` in `modules/*/manifest.json`); change them to your fork if
+you publish your own documentation.
+
 ## Quick start
 
 1. **Install once per Zabbix** — ClickHouse, collector, data source, modules, template: [docs/installation.md](docs/installation.md).
@@ -74,7 +97,9 @@ More: [user experience](docs/screenshots/user-experience.png), [origin of slowne
 
 | Guide | |
 |---|---|
+| [lab.md](docs/lab.md) | Everything in Docker on your machine, in 5 minutes |
 | [installation.md](docs/installation.md) | Once per Zabbix, step by step with a check per step and a smoke test |
+| [install-module.md](docs/install-module.md) | The modules in Zabbix, screen by screen |
 | [add-application.md](docs/add-application.md) | Each application: instrument, reach the collector, Zabbix host, verify |
 | [apm-template.md](docs/apm-template.md) | The APM template: items, triggers, macros, tuning, upgrades |
 | [verification.md](docs/verification.md) | What was tested and how to repeat it |

@@ -19,8 +19,8 @@ Both coexist (different names and UUIDs). The comparison with real data is in [v
 
 ## What it measures
 
-Every minute (`{$OTLP.FREQUENCY}`), over the previous minute (`{$OTLP.GRANULARITY}`), 10 s late (`{$OTLP.TIMESHIFT}`) so
-the collector's batches have arrived:
+Every minute (`{$OTLP.FREQUENCY}`), over the 60 s (`{$OTLP.GRANULARITY}`) that end 10 s before the collection
+(`{$OTLP.TIMESHIFT}`), so the collector's batches have arrived:
 
 | Item | Meaning |
 |---|---|

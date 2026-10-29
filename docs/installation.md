@@ -72,6 +72,8 @@ items say the data source is not configured, set `TelemetryProvider` in the serv
 
 ## 4. Frontend modules
 
+Screen by screen, with screenshots: [install-module.md](install-module.md).
+
 ```sh
 git clone https://github.com/SimonLexRS/zabbix-apm-dashboard.git
 cd zabbix-apm-dashboard
@@ -84,7 +86,7 @@ The script checks the PHP syntax, backs up a previous version to `/var/backups/z
 - **APM Overview**: menu **APM → Overview**;
 - **APM service map** and **APM service health**: dashboard widgets (the map needs APM Overview).
 
-Users need access to the **APM → Traces** UI element (user role). Upgrades: run the script again. Removal:
+Users need, in their user role, the **APM → Traces** UI element and the three modules under *Access to modules*. Upgrades: run the script again. Removal:
 `sudo ./scripts/install.sh --uninstall`.
 
 **Check:** **APM → Overview → Status** shows the data source as OK.

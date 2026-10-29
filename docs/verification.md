@@ -35,9 +35,10 @@ Four applications, each a different way of sending telemetry:
    returns rows, `[{"clock":…,"count":55}]`). Its duration items also had `Duration` as a raw column, which groups the
    result, so they reported the shortest span of the minute (0 s instead of 0.045 s for Unset spans). The generated
    template fixes both: 16/16 items supported, values equal to ClickHouse.
-3. **Values match ClickHouse, per application.** `verify-app.py` compares, minute by minute over the last 10 minutes,
-   the item values with `count()` and `avg(Duration)` computed directly in ClickHouse for the namespace, and checks that
-   they do **not** match the total of all applications. Output for the four applications:
+3. **Values match ClickHouse, per application.** `verify-app.py` compares each item value of the last 10 minutes with
+   `count()` and `avg(Duration)` computed directly in ClickHouse for the namespace, over exactly the seconds that value
+   covers, and checks that they do **not** match the total of all applications. Output with the live applications
+   (`smoke-test` passed the same checks with the previous version of the script; its data has expired):
 
 ```text
 $ python3 scripts/verify-app.py opentelemetry-demo
@@ -46,14 +47,14 @@ OK   host is enabled
 OK   template "OpenTelemetry application by OTLP" is linked
 OK   {$OTLP.NAMESPACE} = 'opentelemetry-demo'
 OK   16 items, unsupported: none
-OK   span items receive values (newest 36 s ago, heartbeat 3600 s)
-OK   Ok    spans/min over 10 min: Zabbix 59.5, ClickHouse 59.0 for opentelemetry-demo (59.0 all applications)
+OK   span items receive values (newest 4 s ago, heartbeat 3600 s)
+OK   Ok    spans per 60 s, 10 values: Zabbix 62.4, ClickHouse 62.4 for opentelemetry-demo (62.4 all applications)
 OK   Ok    average duration: Zabbix 0.0000 s, ClickHouse 0.0000 s
-OK   Error spans/min over 10 min: Zabbix 4.2, ClickHouse 4.2 for opentelemetry-demo (79.0 all applications)
+OK   Error spans per 60 s, 10 values: Zabbix 4.1, ClickHouse 4.1 for opentelemetry-demo (71.3 all applications)
 OK   Error filtered by namespace (not the total of all applications)
-OK   Error average duration: Zabbix 4.0572 s, ClickHouse 4.0572 s
-OK   Unset spans/min over 10 min: Zabbix 6,703.3, ClickHouse 6,697.0 for opentelemetry-demo (7,229.7 all applications)
-OK   Unset average duration: Zabbix 0.0468 s, ClickHouse 0.0503 s
+OK   Error average duration: Zabbix 3.9671 s, ClickHouse 3.9671 s
+OK   Unset spans per 60 s, 10 values: Zabbix 6,760.8, ClickHouse 6,761.4 for opentelemetry-demo (7,188.4 all applications)
+OK   Unset average duration: Zabbix 0.0474 s, ClickHouse 0.0513 s
 ---- all checks passed
 
 $ python3 scripts/verify-app.py flowspock
@@ -62,12 +63,12 @@ OK   host is enabled
 OK   template "OpenTelemetry application by OTLP" is linked
 OK   {$OTLP.NAMESPACE} = 'flowspock'
 OK   16 items, unsupported: none
-OK   span items receive values (newest 112 s ago, heartbeat 3600 s)
-OK   Ok    spans/min over 10 min: Zabbix 0.0, ClickHouse 0.0 for flowspock (59.0 all applications)
-OK   Error spans/min over 10 min: Zabbix 0.0, ClickHouse 0.0 for flowspock (79.0 all applications)
-OK   Unset spans/min over 10 min: Zabbix 63.5, ClickHouse 63.5 for flowspock (7,229.7 all applications)
+OK   span items receive values (newest 200 s ago, heartbeat 3600 s)
+OK   Ok    spans per 60 s, 10 values: Zabbix 0.0, ClickHouse 0.0 for flowspock (62.1 all applications)
+OK   Error spans per 60 s, 10 values: Zabbix 0.0, ClickHouse 0.0 for flowspock (72.8 all applications)
+OK   Unset spans per 60 s, 10 values: Zabbix 56.2, ClickHouse 56.2 for flowspock (7,120.8 all applications)
 OK   Unset filtered by namespace (not the total of all applications)
-OK   Unset average duration: Zabbix 0.0036 s, ClickHouse 0.0036 s
+OK   Unset average duration: Zabbix 0.0034 s, ClickHouse 0.0034 s
 ---- all checks passed
 
 $ python3 scripts/verify-app.py go-example
@@ -76,31 +77,17 @@ OK   host is enabled
 OK   template "OpenTelemetry application by OTLP" is linked
 OK   {$OTLP.NAMESPACE} = 'go-example'
 OK   16 items, unsupported: none
-OK   span items receive values (newest 21 s ago, heartbeat 3600 s)
-OK   Ok    spans/min over 10 min: Zabbix 0.0, ClickHouse 0.0 for go-example (59.0 all applications)
-OK   Error spans/min over 10 min: Zabbix 75.6, ClickHouse 74.8 for go-example (79.0 all applications)
+OK   span items receive values (newest 48 s ago, heartbeat 3600 s)
+OK   Ok    spans per 60 s, 10 values: Zabbix 0.0, ClickHouse 0.0 for go-example (60.7 all applications)
+OK   Error spans per 60 s, 10 values: Zabbix 68.4, ClickHouse 68.4 for go-example (72.6 all applications)
 OK   Error average duration: Zabbix 0.0003 s, ClickHouse 0.0003 s
-OK   Unset spans/min over 10 min: Zabbix 356.6, ClickHouse 357.0 for go-example (7,229.7 all applications)
+OK   Unset spans per 60 s, 10 values: Zabbix 369.4, ClickHouse 369.4 for go-example (7,180.5 all applications)
 OK   Unset filtered by namespace (not the total of all applications)
-OK   Unset average duration: Zabbix 0.1024 s, ClickHouse 0.1033 s
----- all checks passed
-
-$ python3 scripts/verify-app.py smoke-test
-OK   host apm-smoke-test exists
-OK   host is enabled
-OK   template "OpenTelemetry application by OTLP" is linked
-OK   {$OTLP.NAMESPACE} = 'smoke-test'
-OK   16 items, unsupported: none
-OK   span items receive values (newest 125 s ago, heartbeat 3600 s)
-OK   Ok    spans/min over 4 min: Zabbix 0.0, ClickHouse 0.0 for smoke-test (58.0 all applications)
-OK   Error spans/min over 4 min: Zabbix 0.0, ClickHouse 0.0 for smoke-test (69.5 all applications)
-OK   Unset spans/min over 4 min: Zabbix 283.5, ClickHouse 251.2 for smoke-test (7,452.2 all applications)
-OK   Unset filtered by namespace (not the total of all applications)
-OK   Unset average duration: Zabbix 0.0002 s, ClickHouse 0.0002 s
+OK   Unset average duration: Zabbix 0.0916 s, ClickHouse 0.0916 s
 ---- all checks passed
 ```
 
-4. **Onboarding is reproducible and idempotent.** All four hosts were created by `zabbix-apm-app.py add` (template
+4. **Onboarding is reproducible and idempotent.** All the hosts were created by `zabbix-apm-app.py add` (template
    import, host group, host and macro); running it again updates instead of duplicating.
 5. **The OpenTelemetry Demo add-on works as documented.** The demo was restarted with
    [compose.zabbix.yaml](../examples/stacks/opentelemetry-demo/compose.zabbix.yaml) and
@@ -109,14 +96,39 @@ OK   Unset average duration: Zabbix 0.0002 s, ClickHouse 0.0002 s
 6. **The frontend modules**: PHP lint, `php tests/run.php` (patterns, service map, application selection, translation
    coverage) and installation with `scripts/install.sh` on the tested Zabbix; one tab per application in APM Overview.
 
+7. **A second Zabbix, from a clean clone.** The repository cloned into an empty folder and [lab.md](lab.md) followed
+   as written: Zabbix 8.0.0rc3 from the official Docker images (PostgreSQL, PHP 8.5), ClickHouse 26.9, otelcol-contrib
+   0.162. The modules were enabled and the data source set through the screens of
+   [install-module.md](install-module.md) (its screenshots come from this run), then `lab-bootstrap.py` ran over that
+   without changing anything. `go-example` passed `verify-app.py`, and so did a second application connected from
+   outside the compose file as described in "Connect your own application to the lab":
+
+```text
+$ python3 scripts/verify-app.py my-app
+OK   host apm-my-app exists
+OK   host is enabled
+OK   template "OpenTelemetry application by OTLP" is linked
+OK   {$OTLP.NAMESPACE} = 'my-app'
+OK   16 items, unsupported: none
+OK   span items receive values (newest 25 s ago, heartbeat 3600 s)
+OK   Ok    spans per 60 s, 10 values: Zabbix 0.0, ClickHouse 0.0 for my-app (0.0 all applications)
+OK   Error spans per 60 s, 10 values: Zabbix 72.0, ClickHouse 72.0 for my-app (141.8 all applications)
+OK   Error filtered by namespace (not the total of all applications)
+OK   Error average duration: Zabbix 0.0003 s, ClickHouse 0.0003 s
+OK   Unset spans per 60 s, 10 values: Zabbix 366.8, ClickHouse 366.8 for my-app (729.0 all applications)
+OK   Unset filtered by namespace (not the total of all applications)
+OK   Unset average duration: Zabbix 0.0881 s, ClickHouse 0.0881 s
+---- all checks passed
+```
+
 ## How to read the checks
 
-- A value collected at minute T measures minute T−1 (`{$OTLP.GRANULARITY}` 1m, `{$OTLP.TIMESHIFT}` 10s); the script
-  aligns both series that way.
+- A value collected at time T counts the spans of [T − 70 s, T − 10 s) (`{$OTLP.GRANULARITY}` 1m,
+  `{$OTLP.TIMESHIFT}` 10s; the script reads both macros from the host). The collection second depends on the item, not
+  on the start of the minute, so the script compares each value with exactly those seconds in ClickHouse.
 - The template stores counts only when they change (heartbeat 1 h): the script carries the last value forward, as
   Zabbix does.
-- Tolerance 20 %: the first minutes of a new host and spans that arrive after the 10 s time shift make small
-  differences (smoke-test above: 4 minutes of data).
+- Tolerance 20 %: only spans that reach ClickHouse after the 10 s time shift make a difference.
 
 ## Repeat it in your environment
 

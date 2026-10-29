@@ -74,6 +74,8 @@ server ([documentación de Zabbix](https://www.zabbix.com/documentation/8.0/en/m
 
 ## 4. Módulos del frontend
 
+Pantalla a pantalla, con capturas: [install-module.es.md](install-module.es.md).
+
 ```sh
 git clone https://github.com/SimonLexRS/zabbix-apm-dashboard.git
 cd zabbix-apm-dashboard
@@ -86,7 +88,7 @@ El script comprueba la sintaxis PHP, respalda la versión anterior en `/var/back
 - **APM Overview**: menú **APM → Overview**;
 - **APM service map** y **APM service health**: widgets para dashboards (el mapa necesita APM Overview).
 
-Los usuarios necesitan acceso al elemento de interfaz **APM → Traces** (rol de usuario). Para actualizar, ejecuta el
+Los usuarios necesitan, en su rol, el elemento de interfaz **APM → Traces** y los tres módulos en *Access to modules*. Para actualizar, ejecuta el
 script de nuevo. Para desinstalar: `sudo ./scripts/install.sh --uninstall`.
 
 **Comprobación:** **APM → Overview → Estado** muestra la fuente de datos como OK.

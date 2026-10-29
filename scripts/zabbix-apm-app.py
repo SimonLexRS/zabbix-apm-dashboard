@@ -3,6 +3,7 @@
 
   export ZABBIX_URL=http://zabbix.example.com/zabbix   # frontend URL (api_jsonrpc.php is appended)
   export ZABBIX_API_TOKEN=...                           # User settings -> API tokens (Super admin, for the import)
+  # or, e.g. in the lab: export ZABBIX_USER=Admin ZABBIX_PASSWORD=...
 
   python3 scripts/zabbix-apm-app.py add flowspock --name "Flowspock"
   python3 scripts/zabbix-apm-app.py list
@@ -33,10 +34,12 @@ class Api:
 
     def call(self, method: str, params):
         body = json.dumps({'jsonrpc': '2.0', 'method': method, 'params': params, 'id': 1}).encode()
-        request = urllib.request.Request(self.url, body, {
-            'Content-Type': 'application/json-rpc',
-            'Authorization': 'Bearer ' + self.token
-        })
+        headers = {'Content-Type': 'application/json-rpc'}
+
+        if self.token:
+            headers['Authorization'] = 'Bearer ' + self.token
+
+        request = urllib.request.Request(self.url, body, headers)
 
         with urllib.request.urlopen(request, timeout=60) as response:
             result = json.load(response)
@@ -135,11 +138,15 @@ def main() -> int:
 
     url = os.environ.get('ZABBIX_URL')
     token = os.environ.get('ZABBIX_API_TOKEN')
+    user, password = os.environ.get('ZABBIX_USER'), os.environ.get('ZABBIX_PASSWORD')
 
-    if not url or not token:
-        parser.error('set ZABBIX_URL and ZABBIX_API_TOKEN')
+    if not url or not (token or (user and password)):
+        parser.error('set ZABBIX_URL and ZABBIX_API_TOKEN (or ZABBIX_USER and ZABBIX_PASSWORD)')
 
-    api = Api(url, token)
+    api = Api(url, token or '')
+
+    if not token:
+        api.token = api.call('user.login', {'username': user, 'password': password})
 
     if args.command == 'add':
         if not args.namespace.strip():

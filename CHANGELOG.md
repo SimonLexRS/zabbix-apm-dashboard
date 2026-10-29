@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.0
+
+- Lab (`examples/lab`, `scripts/lab-bootstrap.py`, [docs/lab.md](docs/lab.md)): Zabbix 8.0, ClickHouse, a collector, the
+  modules and the instrumented Go example in Docker, configured through the API in one command. Used to check that the
+  documentation works from a clean clone on a Zabbix other than the one it was written on.
+- [docs/install-module.md](docs/install-module.md): installing the modules screen by screen, with screenshots
+  (packages and Docker, Scan directory, data source, role, widgets, update and removal).
+- `zabbix-apm-app.py` and `verify-app.py` also accept `ZABBIX_USER` / `ZABBIX_PASSWORD` instead of an API token.
+- `verify-app.py` compares each item value with exactly the seconds it covers (60 s ending 10 s before the collection,
+  read from `{$OTLP.GRANULARITY}` and `{$OTLP.TIMESHIFT}`) instead of calendar minutes. Values now match ClickHouse
+  exactly, and an application that has just started no longer fails the check.
+- Docs: the user role also needs the three modules under *Access to modules*; how a container outside the lab reaches
+  its collector.
+- PHP 8.5: the deprecation notice of `curl_close()` raised by the ClickHouse client of the Zabbix frontend
+  (`ApmDbClickHouse`) is no longer shown on the module pages and widgets.
+- README: how to fork and replicate the project.
+
 ## 1.7.0
 
 - Service map (page and widget) redrawn to be read at a glance: readable size (it scrolls instead of shrinking the text),

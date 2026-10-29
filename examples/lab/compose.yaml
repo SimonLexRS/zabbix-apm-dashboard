@@ -1,0 +1,107 @@
+# Zabbix APM lab: a complete, disposable environment to try the modules, the template and an instrumented Go service
+# on your machine. Everything runs in Docker; nothing is installed on the host. See docs/lab.md.
+#
+#   cp .env.example .env
+#   docker compose up -d --build
+#   python3 ../../scripts/lab-bootstrap.py
+#
+# Then open http://localhost:8088 (user Admin, password zabbix) → APM → Overview.
+
+name: zabbix-apm-lab
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: ${ZABBIX_DB_PASSWORD}
+      POSTGRES_DB: zabbix
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix"]
+      interval: 5s
+      retries: 20
+
+  zabbix-server:
+    image: ${ZABBIX_SERVER_IMAGE:-zabbix/zabbix-server-pgsql:alpine-trunk}
+    environment:
+      DB_SERVER_HOST: postgres
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: ${ZABBIX_DB_PASSWORD}
+      POSTGRES_DB: zabbix
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  zabbix-web:
+    image: ${ZABBIX_WEB_IMAGE:-zabbix/zabbix-web-nginx-pgsql:alpine-trunk}
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      DB_SERVER_HOST: postgres
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: ${ZABBIX_DB_PASSWORD}
+      POSTGRES_DB: zabbix
+      PHP_TZ: UTC
+    ports:
+      - "127.0.0.1:${ZABBIX_WEB_PORT:-8088}:8080"
+    volumes:
+      # The modules of this repository, as they would be copied into <frontend>/modules on a package install.
+      - ../../modules/ApmOverview:/usr/share/zabbix/modules/ApmOverview:ro
+      - ../../modules/ApmServiceHealth:/usr/share/zabbix/modules/ApmServiceHealth:ro
+      - ../../modules/ApmServiceMap:/usr/share/zabbix/modules/ApmServiceMap:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.9
+    environment:
+      CLICKHOUSE_DB: zabbix
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    ports:
+      # HTTP interface, only to run scripts/verify-app.py from the host against the lab.
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-18123}:8123"
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 5s
+      retries: 30
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    volumes:
+      - ./otelcol-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      # OTLP for applications running on the host (gRPC and HTTP).
+      - "127.0.0.1:${OTLP_GRPC_PORT:-14317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-14318}:4318"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  # The Go example of examples/stacks/go, instrumented with the OpenTelemetry SDK, calling itself four times per second.
+  go-example:
+    build: ../stacks/go
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: go-example-api
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=go-example,deployment.environment.name=lab
+      SELF_LOAD: "1"
+    depends_on:
+      - otel-collector
+
+volumes:
+  postgres:
+  clickhouse:

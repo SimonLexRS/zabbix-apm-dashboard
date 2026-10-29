@@ -19,8 +19,8 @@ Los dos conviven (nombres y UUID distintos). La comparación con datos reales es
 
 ## Qué mide
 
-Cada minuto (`{$OTLP.FREQUENCY}`), sobre el minuto anterior (`{$OTLP.GRANULARITY}`) y con 10 s de retraso
-(`{$OTLP.TIMESHIFT}`) para que hayan llegado los lotes del collector:
+Cada minuto (`{$OTLP.FREQUENCY}`), sobre los 60 s (`{$OTLP.GRANULARITY}`) que terminan 10 s antes de la recogida
+(`{$OTLP.TIMESHIFT}`), para que hayan llegado los lotes del collector:
 
 | Item | Significado |
 |---|---|

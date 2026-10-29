@@ -67,7 +67,7 @@ class ServiceStats {
 		$minutes = max(1, ($time_till - $time_from) / SEC_PER_MIN);
 		$services = [];
 
-		foreach ($db->fetch($query->getSql(), $query->getParams()) as $row) {
+		foreach (self::rows($db, $query->getSql(), $query->getParams()) as $row) {
 			$requests = (int) $row['requests'];
 			$errors = (int) $row['errors'];
 
@@ -128,7 +128,7 @@ class ServiceStats {
 		$empty = array_fill_keys(range($first_bucket, $series_till - SEC_PER_MIN, SEC_PER_MIN), 0);
 		$series = [];
 
-		foreach ($db->fetch($query->getSql(), $query->getParams()) as $row) {
+		foreach (self::rows($db, $query->getSql(), $query->getParams()) as $row) {
 			$bucket = (int) $row['bucket'];
 
 			if (array_key_exists($bucket, $empty)) {
@@ -138,5 +138,30 @@ class ServiceStats {
 		}
 
 		return array_map('array_values', $series);
+	}
+
+	/**
+	 * All the rows of a query, read inside a window that hides one notice of the Zabbix frontend itself: its ClickHouse
+	 * client (ApmDbClickHouse) calls curl_close(), deprecated since PHP 8.5 and without effect since PHP 8.0. Only that
+	 * E_DEPRECATED is dropped; any other error goes to the Zabbix handler as usual. The rows are read completely here
+	 * because the client closes the connection in the finally block of its generator.
+	 */
+	private static function rows(ApmDbClickHouse $db, string $sql, array $params = []): array {
+		$previous = set_error_handler(
+			static function (int $errno, string $errstr, string $errfile = '', int $errline = 0) use (&$previous): bool {
+				if ($errno === E_DEPRECATED && str_ends_with($errfile, 'ApmDbClickHouse.php')) {
+					return true;
+				}
+
+				return $previous !== null ? (bool) $previous($errno, $errstr, $errfile, $errline) : false;
+			}
+		);
+
+		try {
+			return iterator_to_array($db->fetch($sql, $params), false);
+		}
+		finally {
+			restore_error_handler();
+		}
 	}
 }

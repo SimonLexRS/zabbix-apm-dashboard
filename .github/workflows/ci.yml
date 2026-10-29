@@ -53,6 +53,17 @@ jobs:
           sudo env ZABBIX_UI=/tmp/zbx/ui sh scripts/install.sh --uninstall
           test ! -e /tmp/zbx/ui/modules/ApmOverview
 
+  lab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lab compose file and scripts
+        run: |
+          cp examples/lab/.env.example examples/lab/.env
+          docker compose -f examples/lab/compose.yaml config -q
+          python3 -m py_compile scripts/*.py
+
   go-example:
     runs-on: ubuntu-latest
     defaults:
