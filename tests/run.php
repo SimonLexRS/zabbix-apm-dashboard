@@ -87,6 +87,10 @@ namespace Modules\ApmOverview\Includes {
 	check('rum timeline offsets', array_column($timeline, 'offset_ms'), [0.0, 1000.0, 1900.0]);
 	check('rum timeline nesting', array_column($timeline[2]['requests'], 'trace'), ['t2']);
 	check('rum timeline empty', Rum::timeline([]), []);
+	check('rum timeline same instant: action before request', array_column(Rum::timeline([
+		['type' => 'request', 'trace' => 'a', 'start' => 5],
+		['type' => 'action', 'trace' => 'b', 'start' => 5]
+	]), 'type'), ['action', 'request']);
 
 	// APM filter of the user groups: no filters, no condition; values of one key in one IN; keys joined with OR; every
 	// value is a parameter.
@@ -128,6 +132,39 @@ namespace Modules\ApmOverview\Includes {
 			check("guide $key step $i placeholders", array_values(array_diff($m[0], Integration::PLACEHOLDERS)), []);
 		}
 	}
+
+	// Browser guide: three methods, the same tracing code in each, only known placeholders, pinned package versions.
+	$methods = Integration::browserMethods();
+	check('browser guide methods', array_keys($methods), ['script', 'npm', 'nextjs']);
+
+	foreach ($methods as $key => $method) {
+		foreach ($method['steps'] as $i => $step) {
+			check("browser guide $key step $i has title and text", $step['title'] !== '' && $step['text'] !== '', true);
+
+			// Placeholders: a lowercase word in braces.
+			preg_match_all('/\{[a-z_]+\}/', $step['text'].$step['code'], $m);
+			check("browser guide $key step $i placeholders", array_values(array_diff($m[0], Integration::PLACEHOLDERS)), []);
+		}
+
+		check("browser guide $key sets the service and session",
+			str_contains(implode("\n", array_column($method['steps'], 'code')), "span.setAttribute('session.id', sessionId)")
+				&& str_contains(implode("\n", array_column($method['steps'], 'code')), "'service.namespace': '{namespace}'"),
+			true
+		);
+	}
+
+	// Exact versions: digits and dots only.
+	check('browser guide pinned versions', array_filter(Integration::BROWSER_PACKAGES,
+		static fn(string $version): bool => !preg_match('/^\d+\.\d+\.\d+$/', $version)
+	), []);
+
+	// The lab page uses the same packages as the guide.
+	$lab_page = file_get_contents(dirname(__DIR__).'/examples/lab/web/index.html');
+	check('lab page packages match the guide', array_filter(array_keys(Integration::BROWSER_PACKAGES),
+		static fn(string $package): bool => !str_contains($lab_page,
+			'"'.$package.'": "https://esm.sh/'.$package.'@'.Integration::BROWSER_PACKAGES[$package].'?'
+		)
+	), []);
 
 	check('guide host name', Integration::hostName('my shop/v2'), 'apm-my shop-v2');
 	check('guide defaults', Integration::fill('{service} → {zabbix_host}', Integration::defaults('shop')),

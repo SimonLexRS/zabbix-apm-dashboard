@@ -34,19 +34,32 @@ real, y respeta los roles y el APM filter de los grupos de usuarios.
 | Navegador, SO, dispositivo | `user_agent.original` |
 | Core Web Vitals | registros de log con atributos `rum.*` ([más abajo](#core-web-vitals)) |
 
-## Instrumentar una aplicación web
+## Conectar el navegador de una aplicación
 
-La pestaña **Cómo funciona** tiene el código. En resumen:
+Cada aplicación tiene su pestaña, también las que todavía no envían telemetría del navegador (atenuadas). Para esas,
+la página ofrece **Conectar el navegador**: la pestaña **Cómo funciona** tiene una guía con la aplicación ya
+rellenada. Indica el servicio de la parte de navegador y la URL del collector, elige el método y copia:
 
-1. Arranca el SDK web de OpenTelemetry con las instrumentaciones de carga de documento, interacción de usuario y
-   fetch, un span processor que pone `session.id` en cada span, y `service.namespace` = la aplicación.
-2. Deja que el navegador llegue al receptor OTLP/HTTP del collector (puerto 4318), con HTTPS y CORS para el sitio, o a
-   través de una ruta del propio sitio.
-3. Añade las URLs de la API a `propagateTraceHeaderCorsUrls` y permite las cabeceras `traceparent` y `tracestate` en
-   la política CORS de la API: así cada petición continúa en los servicios del backend, en la misma traza.
+| Método | Para | Qué añades |
+|---|---|---|
+| **Sin compilar (script)** | cualquier sitio, renderizado en servidor o estático | un bloque en el `<head>`: un import map que carga el SDK web oficial de OpenTelemetry desde un CDN (versiones fijas) y el código de trazas |
+| **npm / bundler** | Vite, webpack, React, Vue, Angular… | `npm install` de los mismos paquetes y un `otel-browser.js` importado lo primero |
+| **Next.js** | Next.js 15.3 o posterior | el mismo código en `instrumentation-client.ts` |
 
-El frontend del [OpenTelemetry Demo](../examples/stacks/opentelemetry-demo/README.es.md) está instrumentado así y
-llena todas las pestañas.
+El código de trazas es el mismo en los tres: cargas de página, acciones de usuario y peticiones fetch, un `session.id`
+en cada span, `service.name` y `service.namespace` de la aplicación, y el recurso por defecto del SDK (lleva
+`telemetry.sdk.language = webjs`, que distingue los spans del navegador). Después:
+
+1. **Deja que el navegador llegue al collector**: publica su receptor OTLP/HTTP (puerto 4318) con HTTPS y CORS para el
+   sitio o, más sencillo y privado, redirige una ruta del sitio (p. ej. `/otlp/`) al collector y usa esa URL.
+2. **Enlaza las peticiones con el backend**: las peticiones al mismo origen llevan `traceparent` por sí solas; una API
+   en otro origen va en `propagateTraceHeaderCorsUrls` y permite `traceparent` y `tracestate` en su CORS.
+3. **Comprueba**: las comprobaciones bajo la guía se ponen en verde al minuto de navegar.
+
+![Guía para conectar el navegador](screenshots/rum-guide.png)
+
+El laboratorio tiene una página instrumentada exactamente así ([lab.es.md](lab.es.md)), y el frontend del
+[OpenTelemetry Demo](../examples/stacks/opentelemetry-demo/README.es.md) llena todas las pestañas.
 
 ## Límites
 

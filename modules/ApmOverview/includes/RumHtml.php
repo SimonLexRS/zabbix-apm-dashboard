@@ -2,13 +2,20 @@
 
 namespace Modules\ApmOverview\Includes;
 
-use CCol,
+use CButton,
+	CCol,
 	CDiv,
+	CFormField,
+	CFormGrid,
+	CInput,
+	CLabel,
 	CLink,
+	CList,
 	CSection,
 	CSpan,
 	CTableInfo,
 	CTag,
+	CTextBox,
 	CUrl;
 
 /**
@@ -61,7 +68,7 @@ class RumHtml {
 		$kpis = $data['kpis'];
 
 		if ($kpis['views'] == 0 && $kpis['requests'] == 0 && $kpis['actions'] == 0) {
-			return self::noBrowserData();
+			return self::noBrowserData($ctx['application']);
 		}
 
 		$card = static fn(string $label, string $value, string $note, ?string $class = null): CDiv => (new CDiv([
@@ -612,10 +619,120 @@ class RumHtml {
 		return $list;
 	}
 
-	private static function noBrowserData(): CDiv {
-		return new CDiv([
-			OverviewHtml::hint(I18n::t('No browser telemetry for this application in the period. This page shows the spans of the OpenTelemetry web SDK (telemetry.sdk.language = webjs): page loads, user actions and the requests of the page. The How it works tab shows how to instrument a web application.'))
-		]);
+	/**
+	 * An application that sends no browser telemetry yet: what it would show, and the way to connect it.
+	 */
+	private static function noBrowserData(?string $application): CDiv {
+		$name = $application !== null && $application !== '' ? $application : I18n::t('This application');
+
+		return (new CDiv([
+			new CTag('h4', true, sprintf(I18n::t('%s does not send browser telemetry yet'), $name)),
+			new CTag('p', true, I18n::t('Connect the browser part of the application with the OpenTelemetry web SDK (one block of code, no agent) and this page shows:')),
+			(new CList())
+				->addItem(I18n::t('the sessions of real users, step by step, down to the backend service of each request;'))
+				->addItem(I18n::t('how each page loads, and which pages and requests are slow or fail;'))
+				->addItem(I18n::t('the resources, browsers and operating systems of the users.')),
+			(new CLink(I18n::t('Connect the browser'), self::url(RumLoader::TAB_HOWTO)))->addClass(ZBX_STYLE_BTN)
+		]))->addClass('apm-rum-connect');
+	}
+
+	/**
+	 * Interactive guide to connect the browser of an application (filled in by CApmOverviewGuide in the browser): the
+	 * application, the service and the collector URL, then the steps of the chosen method, ready to copy.
+	 */
+	public static function guide(?string $application): CDiv {
+		$values = Integration::defaults($application ?? '');
+		$values['{service}'] = $values['{namespace}'].'-web';
+		$values['{collector}'] = Integration::DEFAULT_BROWSER_COLLECTOR;
+		$methods = Integration::browserMethods();
+		$first = array_key_first($methods);
+
+		// Text with placeholders: rendered with the defaults; the page script fills it in again, as text, from the form.
+		$template = static fn(string $text, string $tag): CTag => (new CTag($tag, true, Integration::fill($text, $values)))
+			->setAttribute('data-apm-template', $text);
+
+		$form = (new CFormGrid())
+			->addClass(CFormGrid::ZBX_STYLE_FORM_GRID_LABEL_WIDTH_TRUE)
+			->addItem([
+				new CLabel(I18n::t('Application (service.namespace)'), 'apm-guide-namespace'),
+				new CFormField(
+					(new CTextBox('apm_guide_namespace', $values['{namespace}']))
+						->setId('apm-guide-namespace')
+						->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
+						->setAttribute('autocomplete', 'off')
+				)
+			])
+			->addItem([
+				new CLabel(I18n::t('Service of the browser (service.name)'), 'apm-guide-service'),
+				new CFormField(
+					(new CTextBox('apm_guide_service', $values['{service}']))
+						->setId('apm-guide-service')
+						->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
+						->setAttribute('autocomplete', 'off')
+				)
+			])
+			->addItem([
+				new CLabel(I18n::t('Collector URL'), 'apm-guide-collector'),
+				new CFormField([
+					(new CTextBox('apm_guide_collector', ''))
+						->setId('apm-guide-collector')
+						->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
+						->setAttribute('autocomplete', 'off')
+						->setAttribute('placeholder', Integration::DEFAULT_BROWSER_COLLECTOR),
+					(new CDiv(I18n::t('OTLP/HTTP receiver as the browsers of the users reach it, without /v1/traces: e.g. https://otel.example.com or https://www.example.com/otlp. Remembered in this browser.')))
+						->addClass(ZBX_STYLE_GREY)
+				])
+			]);
+
+		$radios = (new CTag('ul', true))
+			->setId('apm-guide-language')
+			->addClass('radio-list-control');
+		$panels = [];
+
+		foreach ($methods as $key => $method) {
+			$radio = (new CInput('radio', 'apm_guide_language', $key))->setId('apm-guide-language-'.$key);
+
+			if ($key === $first) {
+				$radio->setAttribute('checked', 'checked');
+			}
+
+			$radios->addItem(new CTag('li', true, [$radio, new CLabel($method['label'], 'apm-guide-language-'.$key)]));
+
+			$steps = (new CDiv())->addClass('apm-guide-steps');
+
+			foreach (array_values($method['steps']) as $i => $step) {
+				$items = [new CTag('h5', true, ($i + 1).'. '.$step['title']), $template($step['text'], 'p')];
+
+				if ($step['code'] !== '') {
+					$items[] = (new CDiv([
+						(new CTag('pre', true, $template($step['code'], 'code')))->addClass('apm-overview-code'),
+						(new CButton('apm_guide_copy', I18n::t('Copy')))
+							->addClass(ZBX_STYLE_BTN_ALT)
+							->addClass('apm-guide-copy')
+							->setAttribute('data-copied', I18n::t('Copied'))
+					]))->addClass('apm-guide-code');
+				}
+
+				$steps->addItem((new CDiv($items))->addClass('apm-guide-step'));
+			}
+
+			$panel = (new CDiv($steps))
+				->addClass('apm-guide-panel')
+				->setAttribute('data-language', $key);
+
+			if ($key !== $first) {
+				$panel->setAttribute('hidden', 'hidden');
+			}
+
+			$panels[] = $panel;
+		}
+
+		return (new CDiv([
+			OverviewHtml::hint(I18n::t('Fill in the application, the service of its browser part and the collector URL: the steps of the chosen method are ready to copy. The checks below show when the data arrives.')),
+			$form,
+			(new CDiv([new CSpan(I18n::t('Method:')), $radios]))->addClass('apm-guide-languages'),
+			$panels
+		]))->setId('apm-guide');
 	}
 
 	private static function host(string $host): string|CSpan {

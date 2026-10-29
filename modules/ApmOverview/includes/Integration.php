@@ -261,6 +261,168 @@ class Integration {
 	}
 
 	/**
+	 * OpenTelemetry web SDK packages of the browser guide: one compatible set (all on @opentelemetry/api 1.9).
+	 */
+	public const BROWSER_PACKAGES = [
+		'@opentelemetry/sdk-trace-web' => '2.12.0',
+		'@opentelemetry/exporter-trace-otlp-http' => '0.223.0',
+		'@opentelemetry/resources' => '2.12.0',
+		'@opentelemetry/instrumentation' => '0.223.0',
+		'@opentelemetry/instrumentation-document-load' => '0.68.0',
+		'@opentelemetry/instrumentation-user-interaction' => '0.67.0',
+		'@opentelemetry/instrumentation-fetch' => '0.223.0'
+	];
+
+	public const DEFAULT_BROWSER_COLLECTOR = 'https://otel.example.com';
+
+	/**
+	 * How to connect the browser part of an application (Real user monitoring guide): without a build step, with npm,
+	 * or in Next.js. The same tracing code in every case.
+	 *
+	 * @return array  [key => ['label' => string, 'steps' => [['title' => string, 'text' => string, 'code' => string]]]]
+	 */
+	public static function browserMethods(): array {
+		// The CDN shares one @opentelemetry/api and core between the packages.
+		$cdn = static fn(string $package, string $version): string => 'https://esm.sh/'.$package.'@'.$version.
+			'?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0';
+
+		$import_map = [];
+
+		foreach (self::BROWSER_PACKAGES as $package => $version) {
+			$import_map[] = '    "'.$package.'": "'.$cdn($package, $version).'"';
+		}
+
+		$npm_install = 'npm install '.implode(' ', array_map(
+			static fn(string $package, string $version): string => $package.'@'.$version,
+			array_keys(self::BROWSER_PACKAGES), self::BROWSER_PACKAGES
+		));
+
+		$common = [
+			[
+				'title' => I18n::t('Let the browser reach the collector'),
+				'text' => I18n::t('The browser sends OTLP over HTTP. Either publish the receiver (port 4318) through HTTPS and allow the origin of the site with CORS, or, simpler and private, forward a path of the site itself to the collector and use that URL as the collector URL above (same origin, no CORS).'),
+				'code' => implode("\n", [
+					'# OpenTelemetry Collector (config.yaml): allow the origin of the site',
+					'receivers:',
+					'  otlp:',
+					'    protocols:',
+					'      http:',
+					'        endpoint: 0.0.0.0:4318',
+					'        cors:',
+					'          allowed_origins: ["https://www.example.com"]',
+					'',
+					'# Or, nginx of the site: same origin, the collector stays private',
+					'location /otlp/ {',
+					'  proxy_pass http://collector:4318/;',
+					'}'
+				])
+			],
+			[
+				'title' => I18n::t('Link the requests to the backend'),
+				'text' => I18n::t('Requests to the same origin carry the trace (traceparent header) by themselves. For an API on another origin, add it to propagateTraceHeaderCorsUrls and allow the traceparent and tracestate headers in its CORS policy. Each request then continues in the backend services, in the same trace, and the session timeline shows them.'),
+				'code' => ''
+			],
+			[
+				'title' => I18n::t('Check that it works'),
+				'text' => I18n::t('Open a few pages and click around: the checks below turn green within a minute, and the application gets its data in the other tabs.'),
+				'code' => ''
+			]
+		];
+
+		$code = implode("\n", [
+			'import { WebTracerProvider, BatchSpanProcessor } from \'@opentelemetry/sdk-trace-web\';',
+			'import { OTLPTraceExporter } from \'@opentelemetry/exporter-trace-otlp-http\';',
+			'import { defaultResource, resourceFromAttributes } from \'@opentelemetry/resources\';',
+			'import { registerInstrumentations } from \'@opentelemetry/instrumentation\';',
+			'import { DocumentLoadInstrumentation } from \'@opentelemetry/instrumentation-document-load\';',
+			'import { UserInteractionInstrumentation } from \'@opentelemetry/instrumentation-user-interaction\';',
+			'import { FetchInstrumentation } from \'@opentelemetry/instrumentation-fetch\';',
+			'',
+			'// One id per browser tab session, on every span.',
+			'const sessionId = sessionStorage.getItem(\'otel.session.id\')',
+			'  ?? crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);',
+			'sessionStorage.setItem(\'otel.session.id\', sessionId);',
+			'',
+			'new WebTracerProvider({',
+			'  // The default resource carries telemetry.sdk.language = webjs, which tells browser spans apart.',
+			'  resource: defaultResource().merge(',
+			'    resourceFromAttributes({ \'service.name\': \'{service}\', \'service.namespace\': \'{namespace}\' })',
+			'  ),',
+			'  spanProcessors: [',
+			'    {',
+			'      onStart: (span) => span.setAttribute(\'session.id\', sessionId),',
+			'      onEnd: () => {}, forceFlush: () => Promise.resolve(), shutdown: () => Promise.resolve()',
+			'    },',
+			'    new BatchSpanProcessor(new OTLPTraceExporter({ url: \'{collector}/v1/traces\' }))',
+			'  ]',
+			'}).register();',
+			'',
+			'registerInstrumentations({',
+			'  instrumentations: [',
+			'    new DocumentLoadInstrumentation(),',
+			'    new UserInteractionInstrumentation(),',
+			'    // An API on another origin: add it here, e.g. /^https:\\/\\/api\\.example\\.com/',
+			'    new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [] })',
+			'  ]',
+			'});'
+		]);
+
+		$indent = static fn(string $text): string => '  '.str_replace("\n", "\n  ", $text);
+
+		return [
+			'script' => [
+				'label' => I18n::t('Without build (script)'),
+				'steps' => array_merge([[
+					'title' => I18n::t('Paste this in the <head> of every page'),
+					'text' => I18n::t('Nothing to install: the browser loads the official OpenTelemetry web SDK from a CDN (pinned versions). Page loads, clicks and fetch requests become spans with the session id. Load the scripts of the application after it (as modules, or with defer), so that their clicks are traced.'),
+					'code' => implode("\n", [
+						'<script type="importmap">',
+						'{',
+						'  "imports": {',
+						implode(",\n", $import_map),
+						'  }',
+						'}',
+						'</script>',
+						'<script type="module">',
+						$indent($code),
+						'</script>'
+					])
+				]], $common)
+			],
+			'npm' => [
+				'label' => I18n::t('npm / bundler'),
+				'steps' => array_merge([
+					[
+						'title' => I18n::t('Install the packages'),
+						'text' => I18n::t('For applications built with a bundler (Vite, webpack, React, Vue, Angular…).'),
+						'code' => $npm_install
+					],
+					[
+						'title' => I18n::t('Add otel-browser.js and import it first'),
+						'text' => I18n::t('Import it at the top of the entry point of the application, before anything else: import \'./otel-browser.js\';'),
+						'code' => "// otel-browser.js\n".$code
+					]
+				], $common)
+			],
+			'nextjs' => [
+				'label' => 'Next.js',
+				'steps' => array_merge([
+					[
+						'title' => I18n::t('Install the packages'),
+						'text' => I18n::t('Next.js 15.3 or later runs instrumentation-client.ts in the browser before the application starts.'),
+						'code' => $npm_install
+					],
+					[
+						'title' => I18n::t('Create instrumentation-client.ts in the root of the project'),
+						'text' => I18n::t('Next to package.json (or in src/). The server side keeps its own instrumentation.ts.'),
+						'code' => "// instrumentation-client.ts\n".$code
+					]
+				], $common)
+			]
+		];
+	}
+
+	/**
 	 * The text with the placeholders replaced, for the first render (the page script does the same in the browser).
 	 */
 	public static function fill(string $template, array $values): string {

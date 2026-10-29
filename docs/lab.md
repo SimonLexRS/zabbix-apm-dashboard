@@ -13,7 +13,7 @@ go-example (Go SDK) ──OTLP──▶ otel-collector ──▶ clickhouse ◀�
 ```
 
 Requirements: Docker with Compose v2, Python 3.10+ (only the standard library), about 3 GB of free RAM, and ports
-8088, 18123, 14317 and 14318 free on 127.0.0.1 (they can be changed in `.env`).
+8088, 8089, 18123, 14317 and 14318 free on 127.0.0.1 (they can be changed in `.env`).
 
 ## Start
 
@@ -41,6 +41,11 @@ python3 scripts/verify-app.py go-example
 ```
 
 Expected: `all checks passed`.
+
+**Real user monitoring**: open **http://localhost:8089**, a small page instrumented with the OpenTelemetry web SDK
+(the snippet of the Real user monitoring guide, in [examples/lab/web](../examples/lab/web)), and click its buttons.
+Within a minute, **APM → Real user monitoring → go-example** shows the session: the page load, each click and each
+request, down to `go-example-api` (the failing request fails there).
 
 On Windows, use `python` instead of `python3`, and in PowerShell set the variables first:
 

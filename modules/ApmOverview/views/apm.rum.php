@@ -11,6 +11,7 @@
 use Modules\ApmOverview\Includes\{
 	I18n,
 	OverviewHtml,
+	RumHtml,
 	RumLoader
 };
 
@@ -102,76 +103,11 @@ $filter_note = $filter_notes
 	]))->addClass('apm-overview-service-filter')
 	: null;
 
-/*
- * How it works: what the page reads, the steps to instrument a web application and the live checks.
- */
-$sdk_code = <<<'JS'
-import { WebTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { resourceFromAttributes } from '@opentelemetry/resources';
-import { registerInstrumentations } from '@opentelemetry/instrumentation';
-import { DocumentLoadInstrumentation } from '@opentelemetry/instrumentation-document-load';
-import { UserInteractionInstrumentation } from '@opentelemetry/instrumentation-user-interaction';
-import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
-
-// One id per browser tab session, on every span.
-const sessionId = sessionStorage.getItem('otel.session.id') ?? crypto.randomUUID();
-sessionStorage.setItem('otel.session.id', sessionId);
-
-const sessionProcessor = {
-  onStart: (span) => span.setAttribute('session.id', sessionId),
-  onEnd: () => {},
-  forceFlush: () => Promise.resolve(),
-  shutdown: () => Promise.resolve()
-};
-
-new WebTracerProvider({
-  resource: resourceFromAttributes({ 'service.name': 'shop-web', 'service.namespace': 'shop' }),
-  spanProcessors: [
-    sessionProcessor,
-    new BatchSpanProcessor(new OTLPTraceExporter({ url: 'https://otel.example.com/v1/traces' }))
-  ]
-}).register();
-
-registerInstrumentations({
-  instrumentations: [
-    new DocumentLoadInstrumentation(),
-    new UserInteractionInstrumentation(),
-    // Requests to these URLs carry the trace to the backend (traceparent header).
-    new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [/^https:\/\/api\.example\.com/] })
-  ]
-});
-JS;
-
-$collector_code = <<<'YAML'
-receivers:
-  otlp:
-    protocols:
-      http:
-        endpoint: 0.0.0.0:4318
-        cors:
-          allowed_origins: ["https://shop.example.com"]
-YAML;
-
-$howto_steps = (new CDiv([
-	new CTag('h5', true, I18n::t('1. Instrument the web application')),
-	new CTag('p', true, I18n::t('Install the OpenTelemetry web SDK packages and start them before the application code. Page loads, user actions and fetch requests become spans; a span processor adds the session id. Set service.namespace to the application, as in its backend services.')),
-	(new CTag('pre', true, new CTag('code', true, $sdk_code)))->addClass('apm-overview-code'),
-	new CTag('h5', true, I18n::t('2. Let the browser reach the collector')),
-	new CTag('p', true, I18n::t('The browser sends OTLP over HTTP (port 4318). Expose that receiver through HTTPS and allow the origin of the web application with CORS:')),
-	(new CTag('pre', true, new CTag('code', true, $collector_code)))->addClass('apm-overview-code'),
-	new CTag('h5', true, I18n::t('3. Link the requests to the backend')),
-	new CTag('p', true, I18n::t('List the API URLs in propagateTraceHeaderCorsUrls, and allow the traceparent and tracestate headers in the CORS policy of the API. Each request then continues in the backend services, in the same trace.')),
-	new CTag('h5', true, I18n::t('4. Core Web Vitals (optional)')),
-	new CTag('p', true, I18n::t('The page loads give the first content visible. For LCP, INP and CLS, the application sends Web Vitals as OTLP log records with rum.* attributes.')),
-	new CLink(I18n::t('How to send Web Vitals'), OverviewHtml::DOCS_URL.'/blob/main/docs/rum.md')
-]))->addClass('apm-guide-step');
-
 $howto_tab = [
 	(new CSection([
 		$hint(I18n::t('This page reads the spans of the OpenTelemetry web SDK (telemetry.sdk.language = webjs) that the application already sends: documentLoad for page loads, the user interaction spans for actions, client spans for requests, session.id and enduser.id for sessions and users. Nothing else is installed.')),
-		$howto_steps
-	]))->setHeader(new CTag('h4', true, I18n::t('Instrument a web application'))),
+		RumHtml::guide($data['filter']['application'])
+	]))->setHeader(new CTag('h4', true, I18n::t('Connect the browser of an application'))),
 	(new CSection($block(RumLoader::TAB_HOWTO)))->setHeader(new CTag('h4', true, I18n::t('Is it working?'))),
 	(new CSection((new CList())
 		->addItem(I18n::t('Route changes of single page applications do not create page loads with the standard instrumentation: they appear as actions and requests.'))
@@ -203,16 +139,24 @@ if ($data['applications']) {
 	foreach ($data['applications'] as $application) {
 		$label = $application !== '' ? $application : I18n::t('No application');
 
+		// Applications without browser telemetry stay reachable (to connect them), muted.
+		$muted = !in_array($application, $data['browser_applications'], true);
+
 		if ($application === $data['filter']['application']) {
-			$app_tabs->addItem((new CSpan($label))->setAttribute('aria-current', 'page'), 'apm-app-tab-active');
+			$app_tabs->addItem((new CSpan($label))->setAttribute('aria-current', 'page'),
+				$muted ? 'apm-app-tab-active apm-app-tab-muted' : 'apm-app-tab-active'
+			);
 		}
 		else {
-			$app_tabs->addItem(new CLink($label, (new CUrl('zabbix.php'))
-				->setArgument('action', 'apm.rum')
-				->setArgument('filter_set', 1)
-				->setArgument('filter_app', $application)
-				->getUrl()
-			));
+			$app_tabs->addItem(
+				(new CLink($label, (new CUrl('zabbix.php'))
+					->setArgument('action', 'apm.rum')
+					->setArgument('filter_set', 1)
+					->setArgument('filter_app', $application)
+					->getUrl()
+				))->setTitle($muted ? I18n::t('No browser telemetry yet') : null),
+				$muted ? 'apm-app-tab-muted' : null
+			);
 		}
 	}
 
@@ -286,6 +230,10 @@ $panel = (new CTag('aside', true, [
 				'failed' => I18n::t('could not refresh')
 			]
 		]).');
+	}
+
+	if (typeof CApmOverviewGuide === "function") {
+		new CApmOverviewGuide({service_suffix: "-web", storage: "apm.rum.guide"});
 	}
 
 	if (typeof CApmRumSessions === "function") {

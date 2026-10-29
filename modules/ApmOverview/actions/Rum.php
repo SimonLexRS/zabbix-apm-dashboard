@@ -78,18 +78,22 @@ class Rum extends CController {
 			}
 		}
 
-		// The applications with browser telemetry; all of them when none has it, so that the guide shows.
+		// Every application, to connect the browser of any of them; the ones that send browser telemetry are marked.
 		try {
 			$stats = new RumStats();
-			$applications = $stats->getBrowserApplications() ?: $stats->getApplications();
+			$applications = $stats->getApplications();
+			$browser_applications = $stats->getBrowserApplications();
 		}
 		catch (\DBException $e) {
 			$applications = [];
+			$browser_applications = [];
 		}
 
-		$application = ApmStats::resolveApplication($applications,
-			CProfile::get(self::PROFILE_IDX.'.filter_app')
-		);
+		// The stored application while it has data; otherwise the first one with browser telemetry.
+		$stored = CProfile::get(self::PROFILE_IDX.'.filter_app');
+		$application = in_array($stored, $applications, true)
+			? $stored
+			: ($browser_applications[0] ?? ApmStats::resolveApplication($applications, null));
 
 		if ($application !== null) {
 			CProfile::update(self::PROFILE_IDX.'.filter_app', $application, PROFILE_TYPE_STR);
@@ -109,6 +113,7 @@ class Rum extends CController {
 
 		$response = new CControllerResponseData([
 			'applications' => $applications,
+			'browser_applications' => $browser_applications,
 			'filter' => $filter,
 			'filter_options' => [
 				'idx' => self::PROFILE_IDX.'.filter',

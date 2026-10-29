@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.1.0
+
+- Real user monitoring lists every application again; the ones without browser telemetry are muted and offer
+  **Connect the browser**.
+- How it works is an interactive guide with the application filled in. There are three methods with the same tracing
+  code:
+  - without a build step: one `<script>` block that loads the official OpenTelemetry web SDK from a CDN, with pinned
+    versions;
+  - npm / bundler;
+  - Next.js (`instrumentation-client.ts`).
+
+  It also covers how the browser reaches the collector (CORS or a path of the site) and how to link the requests to
+  the backend, with live checks below it.
+- The tracing code keeps the default resource of the SDK, so the spans carry `telemetry.sdk.language = webjs`.
+- Lab: `web-example` (http://localhost:8089), a page instrumented with that snippet, calling the Go example through
+  the same origin. Its sessions reach `go-example-api` in the timeline.
+- Session timeline: at the same instant, the action comes before the request it made.
+
 ## 2.0.0
 
 - New page **APM → Real user monitoring**, built from the spans of the OpenTelemetry web SDK

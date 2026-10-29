@@ -250,14 +250,19 @@ class CApmOverviewLive {
  */
 class CApmOverviewGuide {
 
-	constructor() {
+	/**
+	 * @param {string} service_suffix  Default service name: the application followed by this suffix.
+	 * @param {string} storage         Prefix of the values remembered in this browser (collector, method).
+	 */
+	constructor({service_suffix = '-api', storage = 'apm.guide'} = {}) {
 		this._root = document.getElementById('apm-guide');
 
 		if (this._root === null) {
 			return;
 		}
 
-		this._storage = {collector: 'apm.guide.collector', language: 'apm.guide.language'};
+		this._suffix = service_suffix;
+		this._storage = {collector: storage + '.collector', language: storage + '.language'};
 		this._namespace = document.getElementById('apm-guide-namespace');
 		this._service = document.getElementById('apm-guide-service');
 		this._collector = document.getElementById('apm-guide-collector');
@@ -268,7 +273,7 @@ class CApmOverviewGuide {
 		this._namespace.addEventListener('input', () => {
 			// The service follows the application until it is edited.
 			if (this._default_service) {
-				this._service.value = this._namespace.value.trim() !== '' ? this._namespace.value.trim() + '-api' : '';
+				this._service.value = this._namespace.value.trim() !== '' ? this._namespace.value.trim() + this._suffix : '';
 			}
 			this._render();
 		});
@@ -317,7 +322,7 @@ class CApmOverviewGuide {
 
 		return {
 			namespace,
-			service: this._service.value.trim() || namespace + '-api',
+			service: this._service.value.trim() || namespace + this._suffix,
 			collector: this._collector.value.trim() || this._collector.placeholder,
 			// Same rule as Integration::hostName() and scripts/zabbix-apm-app.py: other characters become "-".
 			zabbix_host: 'apm-' + namespace.replace(/[^0-9A-Za-z._ -]/g, '-'),

@@ -126,7 +126,11 @@ class Rum {
 	 * @return array  The rows, with 'offset_ms' from the first one and 'requests' under each action.
 	 */
 	public static function timeline(array $spans): array {
-		usort($spans, static fn(array $a, array $b): int => $a['start'] <=> $b['start']);
+		// In time order; at the same instant, the page load, then the action, then the request it made.
+		$rank = ['view' => 0, 'action' => 1, 'request' => 2];
+		usort($spans, static fn(array $a, array $b): int =>
+			[$a['start'], $rank[$a['type']] ?? 3] <=> [$b['start'], $rank[$b['type']] ?? 3]
+		);
 
 		if (!$spans) {
 			return [];

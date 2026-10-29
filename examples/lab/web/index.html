@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lab shop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The browser part of the go-example application: the snippet of APM → Real user monitoring → How it works,
+     "Without build (script)", with the collector reached through this site (/otlp, see nginx.conf). -->
+<script type="importmap">
+{
+  "imports": {
+    "@opentelemetry/sdk-trace-web": "https://esm.sh/@opentelemetry/sdk-trace-web@2.12.0?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0",
+    "@opentelemetry/exporter-trace-otlp-http": "https://esm.sh/@opentelemetry/exporter-trace-otlp-http@0.223.0?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0",
+    "@opentelemetry/resources": "https://esm.sh/@opentelemetry/resources@2.12.0?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0",
+    "@opentelemetry/instrumentation": "https://esm.sh/@opentelemetry/instrumentation@0.223.0?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0",
+    "@opentelemetry/instrumentation-document-load": "https://esm.sh/@opentelemetry/instrumentation-document-load@0.68.0?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0",
+    "@opentelemetry/instrumentation-user-interaction": "https://esm.sh/@opentelemetry/instrumentation-user-interaction@0.67.0?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0",
+    "@opentelemetry/instrumentation-fetch": "https://esm.sh/@opentelemetry/instrumentation-fetch@0.223.0?deps=@opentelemetry/api@1.9.0,@opentelemetry/core@2.12.0"
+  }
+}
+</script>
+<script type="module">
+  import { WebTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
+  import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+  import { defaultResource, resourceFromAttributes } from '@opentelemetry/resources';
+  import { registerInstrumentations } from '@opentelemetry/instrumentation';
+  import { DocumentLoadInstrumentation } from '@opentelemetry/instrumentation-document-load';
+  import { UserInteractionInstrumentation } from '@opentelemetry/instrumentation-user-interaction';
+  import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
+
+  // One id per browser tab session, on every span.
+  const sessionId = sessionStorage.getItem('otel.session.id')
+    ?? crypto.randomUUID?.() ?? Math.random().toString(36).slice(2);
+  sessionStorage.setItem('otel.session.id', sessionId);
+
+  new WebTracerProvider({
+    // The default resource carries telemetry.sdk.language = webjs, which tells browser spans apart.
+    resource: defaultResource().merge(
+      resourceFromAttributes({ 'service.name': 'go-example-web', 'service.namespace': 'go-example' })
+    ),
+    spanProcessors: [
+      {
+        onStart: (span) => span.setAttribute('session.id', sessionId),
+        onEnd: () => {}, forceFlush: () => Promise.resolve(), shutdown: () => Promise.resolve()
+      },
+      new BatchSpanProcessor(new OTLPTraceExporter({ url: location.origin + '/otlp/v1/traces' }))
+    ]
+  }).register();
+
+  registerInstrumentations({
+    instrumentations: [
+      new DocumentLoadInstrumentation(),
+      new UserInteractionInstrumentation(),
+      new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [] })
+    ]
+  });
+</script>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  button { font: inherit; padding: 6px 14px; margin-right: 8px; cursor: pointer; }
+  pre { background: #f2f4f5; padding: 10px; min-height: 2.5em; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Lab shop</h1>
+<p>Each button calls the Go example through <code>/api</code>. The page, the clicks and the calls are sent to the
+collector as browser spans, linked to the traces of the Go service: open Zabbix → APM → Real user monitoring →
+go-example.</p>
+<p>
+  <button type="button" data-path="/api/hello">Say hello</button>
+  <button type="button" data-path="/api/slow">Slow request</button>
+  <button type="button" data-path="/api/fail">Failing request</button>
+</p>
+<pre id="result"></pre>
+<!-- A module too, so that it runs after the OpenTelemetry snippet and its clicks are traced. -->
+<script type="module">
+  document.addEventListener('click', async (e) => {
+    const button = e.target.closest('button[data-path]');
+
+    if (button !== null) {
+      const response = await fetch(button.dataset.path);
+      document.getElementById('result').textContent = response.status + ' ' + (await response.text());
+    }
+  });
+</script>
+</body>
+</html>

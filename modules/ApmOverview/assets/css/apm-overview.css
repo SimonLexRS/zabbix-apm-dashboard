@@ -1171,3 +1171,19 @@ html[color-scheme="dark"] .apm-rum-panel {
 .apm-rum-backend {
 	color: #768d99;
 }
+
+.apm-app-tabs .apm-app-tab-muted a,
+.apm-app-tabs .apm-app-tab-muted span {
+	opacity: 0.6;
+}
+
+.apm-rum-connect {
+	max-width: 760px;
+	padding: 4px 0 8px;
+	line-height: 1.6;
+}
+
+.apm-rum-connect ul {
+	margin: 4px 0 12px 18px;
+	list-style: disc;
+}

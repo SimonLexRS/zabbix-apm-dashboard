@@ -16,7 +16,7 @@ Requisitos:
 - Docker con Compose v2;
 - Python 3.10+ (solo la biblioteca estándar);
 - unos 3 GB de RAM libres;
-- los puertos 8088, 18123, 14317 y 14318 libres en 127.0.0.1 (se pueden cambiar en `.env`).
+- los puertos 8088, 8089, 18123, 14317 y 14318 libres en 127.0.0.1 (se pueden cambiar en `.env`).
 
 ## Arrancar
 
@@ -45,6 +45,11 @@ python3 scripts/verify-app.py go-example
 ```
 
 Resultado esperado: `all checks passed`.
+
+**Monitorización de usuarios reales**: abre **http://localhost:8089**, una pequeña página instrumentada con el SDK web
+de OpenTelemetry (el snippet de la guía de Real user monitoring, en [examples/lab/web](../examples/lab/web)), y pulsa
+sus botones. En menos de un minuto, **APM → Real user monitoring → go-example** muestra la sesión: la carga de la
+página, cada clic y cada petición, hasta `go-example-api` (la petición que falla, falla ahí).
 
 En Windows usa `python` en lugar de `python3`; en PowerShell, define antes las variables:
 
