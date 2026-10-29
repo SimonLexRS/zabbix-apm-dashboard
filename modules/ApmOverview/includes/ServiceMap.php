@@ -12,6 +12,10 @@ use CDiv,
  * database or external host), drawn as an inline SVG in columns from the users to the dependencies. Shared by the APM
  * overview page and the APM service map widget.
  *
+ * Edges are colored by health, as thick as their share of the traffic, and carry moving particles (the live flow); the
+ * figures are in the tooltips and the connections table, not written on the arrows. Hovering highlights a path and shows the figures (apm-overview.js,
+ * CApmServiceMapInteraction), from the data-* attributes written here.
+ *
  * All names come from telemetry and go through CTag, which escapes them.
  */
 class ServiceMap {
@@ -23,18 +27,41 @@ class ServiceMap {
 		'error_high' => 5
 	];
 
-	private const NODE_WIDTH = 190;
-	private const NODE_HEIGHT = 58;
-	private const COLUMN_GAP = 210;
-	private const ROW_GAP = 26;
+	private const NODE_WIDTH = 160;
+	private const NODE_HEIGHT = 54;
+	private const COLUMN_GAP = 80;
+	private const ROW_GAP = 18;
 	private const PADDING = 16;
-	private const NAME_MAX_LENGTH = 24;
+	private const NAME_MAX_LENGTH = 20;
+
+	// The map is shrunk at most to this share of its natural size; wider maps scroll instead of becoming unreadable.
+	private const MIN_SCALE = 0.8;
+
+	// Barycenter sweeps (forward and backward) used to order the nodes of each column.
+	private const ORDER_SWEEPS = 4;
+
+	private const EDGE_WIDTH_MIN = 1.5;
+	private const EDGE_WIDTH_MAX = 8;
+
+	// Calls per minute from which the particles of an edge move at medium and fast speed.
+	private const FLOW_MEDIUM = 5;
+	private const FLOW_FAST = 60;
+
+	private const ATTENTION_LIMIT = 8;
 
 	private const KIND_LABELS = [
-		'users' => 'USERS',
-		'service' => 'SERVICE',
-		'database' => 'DATABASE',
-		'external' => 'EXTERNAL'
+		'users' => 'Users',
+		'service' => 'Service',
+		'database' => 'Database',
+		'external' => 'External service'
+	];
+
+	// 16 × 16 pictograms drawn at the left of each node.
+	private const KIND_ICONS = [
+		'users' => 'M8 1.5a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM2 14.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5z',
+		'service' => 'M8 1 14.5 4.75v6.5L8 15 1.5 11.25v-6.5z',
+		'database' => 'M2 3.5C2 2.1 4.7 1 8 1s6 1.1 6 2.5v9C14 13.9 11.3 15 8 15s-6-1.1-6-2.5zM2 3.5C2 4.9 4.7 6 8 6s6-1.1 6-2.5',
+		'external' => 'M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zM1 8h14M8 1c2 2 2.6 4.3 2.6 7S10 13 8 15C6 13 5.4 10.7 5.4 8S6 3 8 1z'
 	];
 
 	/**
@@ -142,6 +169,181 @@ class ServiceMap {
 	}
 
 	/**
+	 * What matters now, from the map: entry traffic and errors, the slowest service, health counts and the services and
+	 * connections that need attention (most severe first).
+	 *
+	 * @return array  ['rpm', 'requests', 'error_rate', 'slowest' => ?['name', 'p95'], 'health' => ['ok', 'warn', 'bad'],
+	 *                'attention' => [['severity' => 'bad'|'warn', 'label', 'reason', 'service' => ?string]]]
+	 */
+	public static function summary(array $graph, array $thresholds = self::DEFAULT_THRESHOLDS): array {
+		$nodes = $graph['nodes'];
+		$result = ['rpm' => 0.0, 'requests' => 0, 'error_rate' => 0.0, 'slowest' => null,
+			'health' => ['ok' => 0, 'warn' => 0, 'bad' => 0], 'attention' => []
+		];
+		$entry_errors = 0;
+
+		foreach ($graph['edges'] as $edge) {
+			if ($edge['from'] === 'users') {
+				$result['requests'] += $edge['calls'];
+				$entry_errors += $edge['errors'];
+				$result['rpm'] += $edge['rpm'];
+			}
+		}
+
+		$result['error_rate'] = $result['requests'] > 0 ? $entry_errors / $result['requests'] * 100 : 0.0;
+		$attention = [];
+
+		foreach ($nodes as $node) {
+			if ($node['kind'] !== 'service') {
+				continue;
+			}
+
+			$error_rate = self::errorRate($node['errors'], $node['requests']);
+			$health = self::health($error_rate, $node['p95'], $thresholds);
+			$result['health'][$health]++;
+
+			if ($node['p95'] !== null && ($result['slowest'] === null || $node['p95'] > $result['slowest']['p95'])) {
+				$result['slowest'] = ['name' => $node['name'], 'p95' => $node['p95']];
+			}
+
+			if ($health !== 'ok') {
+				$attention[] = [$health, $error_rate, $node['p95'] ?? 0, $node['name'],
+					self::reason($error_rate, $node['p95'], $thresholds), $node['name']
+				];
+			}
+		}
+
+		// Connections between services and to dependencies; users → service is the service itself.
+		foreach ($graph['edges'] as $edge) {
+			if ($edge['from'] === 'users') {
+				continue;
+			}
+
+			$error_rate = self::errorRate($edge['errors'], $edge['calls']);
+			$health = self::health($error_rate, $edge['p95'], $thresholds);
+
+			if ($health !== 'ok') {
+				$attention[] = [$health, $error_rate, $edge['p95'], $nodes[$edge['from']]['name'].' → '.
+					$nodes[$edge['to']]['name'], self::reason($error_rate, $edge['p95'], $thresholds),
+					$nodes[$edge['from']]['name']
+				];
+			}
+		}
+
+		// Problems before warnings, then more errors, then slower, then by name.
+		usort($attention, static fn(array $a, array $b): int =>
+			[$b[0] === 'bad', $b[1], $b[2], $a[3]] <=> [$a[0] === 'bad', $a[1], $a[2], $b[3]]
+		);
+
+		foreach (array_slice($attention, 0, self::ATTENTION_LIMIT) as [$health, , , $label, $reason, $service]) {
+			$result['attention'][] = ['severity' => $health, 'label' => $label, 'reason' => $reason, 'service' => $service];
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Width of an edge from its share of the traffic of the busiest edge (square root: small edges stay visible).
+	 */
+	public static function edgeWidth(float $rpm, float $max_rpm): float {
+		if ($max_rpm <= 0) {
+			return self::EDGE_WIDTH_MIN;
+		}
+
+		return round(self::EDGE_WIDTH_MIN + (self::EDGE_WIDTH_MAX - self::EDGE_WIDTH_MIN) * sqrt(min(1, $rpm / $max_rpm)), 1);
+	}
+
+	/**
+	 * Speed of the particles of an edge: slow, medium or fast.
+	 */
+	public static function flowSpeed(float $rpm): string {
+		return $rpm >= self::FLOW_FAST ? 'fast' : ($rpm >= self::FLOW_MEDIUM ? 'medium' : 'slow');
+	}
+
+	/**
+	 * Order of the nodes of each column: barycenter sweeps, forward by the callers and backward by the callees, so
+	 * that fewer arrows cross. Deterministic for the same graph.
+	 *
+	 * @param array $nodes  [id => node with 'layer', 'requests', 'name']
+	 * @param array $edges  [['from', 'to'], ...]
+	 *
+	 * @return array  [layer => [id, ...]], layers in ascending order.
+	 */
+	public static function orderColumns(array $nodes, array $edges): array {
+		$columns = [];
+
+		foreach ($nodes as $id => $node) {
+			$columns[$node['layer']][] = $id;
+		}
+
+		ksort($columns);
+
+		foreach ($columns as &$ids) {
+			usort($ids, static fn(string $a, string $b): int =>
+				[-$nodes[$a]['requests'], $nodes[$a]['name']] <=> [-$nodes[$b]['requests'], $nodes[$b]['name']]
+			);
+		}
+		unset($ids);
+
+		$parents = [];
+		$children = [];
+
+		foreach ($edges as $edge) {
+			$parents[$edge['to']][] = $edge['from'];
+			$children[$edge['from']][] = $edge['to'];
+		}
+
+		$layers = array_keys($columns);
+
+		for ($sweep = 0; $sweep < self::ORDER_SWEEPS; $sweep++) {
+			$forward = $sweep % 2 == 0;
+			$neighbours = $forward ? $parents : $children;
+
+			foreach ($forward ? $layers : array_reverse($layers) as $layer) {
+				$y = self::rowPositions($columns);
+				$keys = [];
+
+				foreach ($columns[$layer] as $id) {
+					$others = array_filter($neighbours[$id] ?? [],
+						static fn(string $other): bool => $forward
+							? $nodes[$other]['layer'] < $layer
+							: $nodes[$other]['layer'] > $layer
+					);
+					$keys[$id] = $others
+						? array_sum(array_map(static fn(string $other): float => $y[$other], $others)) / count($others)
+						: $y[$id];
+				}
+
+				usort($columns[$layer], static fn(string $a, string $b): int =>
+					[$keys[$a], $y[$a], $nodes[$a]['name']] <=> [$keys[$b], $y[$b], $nodes[$b]['name']]
+				);
+			}
+		}
+
+		return $columns;
+	}
+
+	/**
+	 * Arrows that cross between the same pair of columns (to compare orderings).
+	 */
+	public static function crossings(array $columns, array $nodes, array $edges): int {
+		$y = self::rowPositions($columns);
+		$count = 0;
+
+		foreach ($edges as $i => $a) {
+			foreach (array_slice($edges, $i + 1) as $b) {
+				if ($nodes[$a['from']]['layer'] == $nodes[$b['from']]['layer']
+						&& $nodes[$a['to']]['layer'] == $nodes[$b['to']]['layer']
+						&& ($y[$a['from']] - $y[$b['from']]) * ($y[$a['to']] - $y[$b['to']]) < 0) {
+					$count++;
+				}
+			}
+		}
+
+		return $count;
+	}
+
+	/**
 	 * Map as SVG with a legend.
 	 *
 	 * @param array $graph       Output of build().
@@ -173,44 +375,7 @@ class ServiceMap {
 			}
 		}
 
-		$dim_node = static fn(string $id): bool => $focus !== '' && !array_key_exists($id, $lit_nodes);
-
-		// Columns, each sorted by the average row of the nodes that call it (fewer crossing arrows).
-		$columns = [];
-
-		foreach ($nodes as $id => $node) {
-			$columns[$node['layer']][] = $id;
-		}
-
-		ksort($columns);
-		$rows = [];
-
-		foreach ($columns as $layer => &$ids) {
-			$order = [];
-
-			foreach ($ids as $id) {
-				$parents = [];
-
-				foreach ($graph['edges'] as $edge) {
-					if ($edge['to'] === $id && array_key_exists($edge['from'], $rows)) {
-						$parents[] = $rows[$edge['from']];
-					}
-				}
-
-				$order[$id] = [$parents ? array_sum($parents) / count($parents) : 0, -$nodes[$id]['requests'],
-					$nodes[$id]['name']
-				];
-			}
-
-			uasort($order, static fn(array $a, array $b): int => $a <=> $b);
-			$ids = array_keys($order);
-
-			foreach ($ids as $row => $id) {
-				$rows[$id] = $row;
-			}
-		}
-		unset($ids);
-
+		$columns = self::orderColumns($nodes, $graph['edges']);
 		$max_rows = max(array_map('count', $columns));
 		$width = 2 * self::PADDING + count($columns) * self::NODE_WIDTH + (count($columns) - 1) * self::COLUMN_GAP;
 		$height = 2 * self::PADDING + $max_rows * self::NODE_HEIGHT + ($max_rows - 1) * self::ROW_GAP;
@@ -232,30 +397,51 @@ class ServiceMap {
 			$column_index++;
 		}
 
+		$defs = new CTag('defs', true);
+
+		foreach (['ok', 'warn', 'bad'] as $health) {
+			$defs->addItem(
+				(new CTag('marker', true))
+					->setId('apm-map-arrow-'.$health)
+					->addClass('apm-map-arrow')
+					->addClass('apm-map-'.$health)
+					->setAttribute('viewBox', '0 0 10 10')
+					->setAttribute('refX', '9')
+					->setAttribute('refY', '5')
+					->setAttribute('markerUnits', 'userSpaceOnUse')
+					->setAttribute('markerWidth', '9')
+					->setAttribute('markerHeight', '9')
+					->setAttribute('orient', 'auto-start-reverse')
+					->addItem((new CTag('path', true))->setAttribute('d', 'M0,0 L10,5 L0,10 z'))
+			);
+		}
+
 		$svg = (new CTag('svg', true))
 			->addClass('apm-map-svg')
 			->setAttribute('width', (string) $width)
 			->setAttribute('height', (string) $height)
 			->setAttribute('viewBox', '0 0 '.$width.' '.$height)
+			->setAttribute('style', 'min-width: '.round($width * self::MIN_SCALE).'px')
 			->setAttribute('role', 'img')
 			->setAttribute('aria-label', I18n::t('Service map: users, services and their dependencies'))
-			->addItem(
-				(new CTag('defs', true))->addItem(
-					(new CTag('marker', true))
-						->setId('apm-map-arrow')
-						->setAttribute('viewBox', '0 0 10 10')
-						->setAttribute('refX', '9')
-						->setAttribute('refY', '5')
-						->setAttribute('markerUnits', 'userSpaceOnUse')
-						->setAttribute('markerWidth', '10')
-						->setAttribute('markerHeight', '10')
-						->setAttribute('orient', 'auto-start-reverse')
-						->addItem((new CTag('path', true))->setAttribute('d', 'M0,0 L10,5 L0,10 z'))
-				)
-			);
+			->addItem($defs);
+
+		$max_rpm = max(array_column($graph['edges'], 'rpm') ?: [0]);
+		$callers = [];
+		$callees = [];
+		$slowest_dependency = [];
+
+		foreach ($graph['edges'] as $edge) {
+			$callers[$edge['to']] = ($callers[$edge['to']] ?? 0) + 1;
+			$callees[$edge['from']] = ($callees[$edge['from']] ?? 0) + 1;
+
+			if ($edge['from'] !== 'users'
+					&& $edge['p95'] > ($slowest_dependency[$edge['from']]['p95'] ?? -1)) {
+				$slowest_dependency[$edge['from']] = ['name' => $nodes[$edge['to']]['name'], 'p95' => $edge['p95']];
+			}
+		}
 
 		$edge_layer = (new CTag('g', true))->addClass('apm-map-edges');
-		$label_layer = (new CTag('g', true))->addClass('apm-map-labels');
 
 		foreach ($graph['edges'] as $i => $edge) {
 			$dim = $focus !== '' && !array_key_exists($i, $lit_edges);
@@ -266,38 +452,46 @@ class ServiceMap {
 			$y1 += self::NODE_HEIGHT / 2;
 			$y2 += self::NODE_HEIGHT / 2;
 			$dx = max(40, abs($x2 - $x1) / 2);
+			$d = sprintf('M%.1f,%.1f C%.1f,%.1f %.1f,%.1f %.1f,%.1f', $x1, $y1, $x1 + $dx, $y1, $x2 - $dx, $y2, $x2 - 2, $y2);
 
-			$error_rate = $edge['calls'] > 0 ? $edge['errors'] / $edge['calls'] * 100 : 0;
+			$error_rate = self::errorRate($edge['errors'], $edge['calls']);
 			$health = self::health($error_rate, $edge['p95'], $thresholds);
-			$summary = self::summary($edge['rpm'], $error_rate, $edge['p95']);
-			$title = $nodes[$edge['from']]['name'].' → '.$nodes[$edge['to']]['name'].': '.
-				sprintf(I18n::t('%s calls (%s)'), self::formatCount($edge['calls']), $summary);
+			$from_name = $nodes[$edge['from']]['name'];
+			$to_name = $nodes[$edge['to']]['name'];
+			$width_px = self::edgeWidth($edge['rpm'], $max_rpm);
 
-			$path = (new CTag('path', true))
-				->setAttribute('d', sprintf('M%.1f,%.1f C%.1f,%.1f %.1f,%.1f %.1f,%.1f',
-					$x1, $y1, $x1 + $dx, $y1, $x2 - $dx, $y2, $x2 - 2, $y2
-				))
-				->setAttribute('stroke-width', (string) round(1.5 + min(5, log10(1 + $edge['rpm']) * 2), 1))
-				->setAttribute('marker-end', 'url(#apm-map-arrow)');
-
-			$edge_layer->addItem(
-				self::link(self::edgeUrl($edge, $nodes, $ctx), $title,
-					(new CTag('g', true))
-						->addClass('apm-map-edge')
-						->addClass('apm-map-'.$health)
-						->addClass($dim ? 'apm-map-dim' : null)
-						->addItem($path)
+			$group = (new CTag('g', true))
+				->addClass('apm-map-edge')
+				->addClass('apm-map-'.$health)
+				->addClass('apm-map-flow-'.self::flowSpeed($edge['rpm']))
+				->addClass($edge['errors'] > 0 ? 'apm-map-erroring' : null)
+				->addClass($dim ? 'apm-map-dim' : null)
+				->setAttribute('data-apm-edge', $edge['from'].'>'.$edge['to'])
+				->setAttribute('data-from', $edge['from'])
+				->setAttribute('data-to', $edge['to'])
+				->setAttribute('data-tip-title', $from_name.' → '.$to_name)
+				->setAttribute('data-tip', implode("\n", [
+					sprintf(I18n::t('Calls: %s (%s/min)'), self::formatCount($edge['calls']), self::formatRate($edge['rpm'])),
+					sprintf(I18n::t('Errors: %s'), sprintf('%.1f %%', $error_rate)),
+					'p95: '.ApmStats::formatDuration($edge['p95'] ?? 0)
+				]))
+				->addItem(
+					(new CTag('path', true))
+						->addClass('apm-map-line')
+						->setAttribute('d', $d)
+						->setAttribute('stroke-width', (string) $width_px)
+						->setAttribute('marker-end', 'url(#apm-map-arrow-'.$health.')')
 				)
-			);
+				->addItem(
+					(new CTag('path', true))
+						->addClass('apm-map-flow')
+						->setAttribute('d', $d)
+						->setAttribute('stroke-width', (string) max(2.5, min(5, $width_px)))
+				);
 
-			$label_layer->addItem(
-				(new CTag('text', true, $summary))
-					->addClass('apm-map-edge-label')
-					->addClass($dim ? 'apm-map-dim' : null)
-					->setAttribute('x', (string) round(($x1 + $x2) / 2, 1))
-					->setAttribute('y', (string) round(($y1 + $y2) / 2 - 5, 1))
-					->setAttribute('text-anchor', 'middle')
-			);
+			$edge_layer->addItem(self::link(self::edgeUrl($edge, $nodes, $ctx),
+				$from_name.' → '.$to_name, $group
+			));
 		}
 
 		$node_layer = (new CTag('g', true))->addClass('apm-map-nodes');
@@ -305,60 +499,100 @@ class ServiceMap {
 		foreach ($nodes as $id => $node) {
 			[$x, $y] = $positions[$id];
 
-			$error_rate = $node['requests'] > 0 ? $node['errors'] / $node['requests'] * 100 : 0;
+			$error_rate = self::errorRate($node['errors'], $node['requests']);
 			$health = $node['kind'] === 'users' ? 'neutral' : self::health($error_rate, $node['p95'], $thresholds);
-			$summary = $node['kind'] === 'users'
-				? self::formatRate($node['rpm']).'/min'
-				: self::summary($node['rpm'], $error_rate, $node['p95']);
 			$name = mb_strlen($node['name']) > self::NAME_MAX_LENGTH
 				? mb_substr($node['name'], 0, self::NAME_MAX_LENGTH - 1).'…'
 				: $node['name'];
+
+			$stats = (new CTag('text', true))
+				->addClass('apm-map-node-stats')
+				->setAttribute('x', '34')
+				->setAttribute('y', '41');
+
+			if ($node['kind'] === 'users') {
+				$stats->addItem(self::formatRate($node['rpm']).'/min');
+			}
+			else {
+				$stats
+					->addItem(self::formatRate($node['rpm']).'/min · ')
+					->addItem((new CTag('tspan', true, sprintf('%.1f%%', $error_rate)))
+						->addClass($error_rate >= $thresholds['error_warning'] ? 'apm-map-hot' : null)
+					)
+					->addItem($node['p95'] !== null ? ' · ' : '')
+					->addItem($node['p95'] !== null
+						? (new CTag('tspan', true, self::shortDuration($node['p95'])))
+							->addClass($node['p95'] >= $thresholds['latency_warning'] ? 'apm-map-hot' : null)
+						: null
+					);
+			}
+
+			$tip = [
+				sprintf(I18n::t('Requests: %s (%s/min)'), self::formatCount($node['requests']), self::formatRate($node['rpm']))
+			];
+
+			if ($node['kind'] !== 'users') {
+				$tip[] = sprintf(I18n::t('Errors: %s'), sprintf('%.1f %%', $error_rate));
+				$tip[] = 'p95: '.($node['p95'] !== null ? ApmStats::formatDuration($node['p95']) : '—');
+			}
+
+			$tip[] = sprintf(I18n::t('Called by: %d · Calls: %d'), $callers[$id] ?? 0, $callees[$id] ?? 0);
+
+			if (array_key_exists($id, $slowest_dependency)) {
+				$tip[] = sprintf(I18n::t('Slowest dependency: %s (p95 %s)'), $slowest_dependency[$id]['name'],
+					ApmStats::formatDuration($slowest_dependency[$id]['p95'])
+				);
+			}
 
 			$group = (new CTag('g', true))
 				->addClass('apm-map-node')
 				->addClass('apm-map-'.$health)
 				->addClass('apm-map-kind-'.$node['kind'])
-				->addClass($dim_node($id) ? 'apm-map-dim' : null)
+				->addClass($focus !== '' && !array_key_exists($id, $lit_nodes) ? 'apm-map-dim' : null)
 				->addClass($focus !== '' && $node['kind'] === 'service' && self::matches($node['name'], $focus)
 					? 'apm-map-focus'
 					: null
 				)
 				->setAttribute('transform', sprintf('translate(%.1f,%.1f)', $x, $y))
+				->setAttribute('data-apm-node', $id)
+				->setAttribute('data-tip-title', $node['name'].' · '.I18n::t(self::KIND_LABELS[$node['kind']]))
+				->setAttribute('data-tip', implode("\n", $tip))
 				->addItem(
 					(new CTag('rect', true))
+						->addClass('apm-map-card')
 						->setAttribute('width', (string) self::NODE_WIDTH)
 						->setAttribute('height', (string) self::NODE_HEIGHT)
-						->setAttribute('rx', '6')
+						->setAttribute('rx', '8')
 				)
 				->addItem(
-					(new CTag('text', true, I18n::t(self::KIND_LABELS[$node['kind']])))
-						->addClass('apm-map-node-kind')
-						->setAttribute('x', '10')
-						->setAttribute('y', '15')
+					(new CTag('rect', true))
+						->addClass('apm-map-bar')
+						->setAttribute('width', '4')
+						->setAttribute('height', (string) (self::NODE_HEIGHT - 12))
+						->setAttribute('x', '4')
+						->setAttribute('y', '6')
+						->setAttribute('rx', '2')
+				)
+				->addItem(
+					(new CTag('path', true))
+						->addClass('apm-map-icon')
+						->setAttribute('d', self::KIND_ICONS[$node['kind']])
+						->setAttribute('transform', 'translate(12,12)')
 				)
 				->addItem(
 					(new CTag('text', true, $name))
 						->addClass('apm-map-node-name')
-						->setAttribute('x', '10')
-						->setAttribute('y', '32')
+						->setAttribute('x', '34')
+						->setAttribute('y', '23')
 				)
-				->addItem(
-					(new CTag('text', true, $summary))
-						->addClass('apm-map-node-stats')
-						->setAttribute('x', '10')
-						->setAttribute('y', '49')
-				);
+				->addItem($stats);
 
-			$title = $node['name'].' ('.mb_strtolower(I18n::t(self::KIND_LABELS[$node['kind']])).'): '.
-				sprintf(I18n::t('%s requests, %s'), self::formatCount($node['requests']), $summary);
-
-			$node_layer->addItem(self::link(self::nodeUrl($node), $title, $group));
+			$node_layer->addItem(self::link(self::nodeUrl($node), $node['name'], $group));
 		}
 
 		$svg
 			->addItem($edge_layer)
-			->addItem($node_layer)
-			->addItem($label_layer);
+			->addItem($node_layer);
 
 		return (new CDiv([
 			(new CDiv($svg))->addClass('apm-map-canvas'),
@@ -403,6 +637,46 @@ class ServiceMap {
 		return 'ok';
 	}
 
+	/**
+	 * Duration for small spaces (nodes, cards): 0.4ms, 26ms, 1.5s, 1m 5s.
+	 */
+	public static function shortDuration(float $ns): string {
+		$ms = $ns / 1000000;
+
+		if ($ms < 10) {
+			return sprintf('%.1fms', $ms);
+		}
+
+		if ($ms < 1000) {
+			return round($ms).'ms';
+		}
+
+		if ($ms < 60000) {
+			return sprintf('%.1fs', $ms / 1000);
+		}
+
+		$seconds = (int) round($ms / 1000);
+
+		return intdiv($seconds, 60).'m '.($seconds % 60).'s';
+	}
+
+	/**
+	 * Why something is not healthy: the error rate and/or the p95 over their warning thresholds.
+	 */
+	private static function reason(float $error_rate, ?float $p95, array $thresholds): string {
+		$parts = [];
+
+		if ($error_rate >= $thresholds['error_warning']) {
+			$parts[] = sprintf(I18n::t('%s errors'), sprintf('%.1f %%', $error_rate));
+		}
+
+		if ($p95 !== null && $p95 >= $thresholds['latency_warning']) {
+			$parts[] = 'p95 '.self::shortDuration($p95);
+		}
+
+		return implode(' · ', $parts);
+	}
+
 	private static function legend(array $thresholds): CDiv {
 		$item = static fn(string $class, string $text): CSpan => new CSpan([
 			(new CSpan())->addClass('apm-map-dot')->addClass('apm-map-'.$class),
@@ -417,20 +691,18 @@ class ServiceMap {
 			$item('bad', sprintf(I18n::t('Problem: errors ≥ %s %% or p95 ≥ %s'), $thresholds['error_high'],
 				ApmStats::formatDuration($thresholds['latency_high'])
 			)),
-			new CSpan(I18n::t('Arrows: calls/min · errors · p95 (thicker = more traffic). Click a service: where its time goes.'))
+			new CSpan(I18n::t('Thickness = share of the traffic · moving dots = live flow (faster = more calls). Hover a service to follow its path; click it to see where its time goes.'))
 		]))->addClass('apm-map-legend');
 	}
 
-	private static function link(?CUrl $url, string $title, CTag $content): CTag {
-		$content->addItem(new CTag('title', true, $title));
+	private static function link(?CUrl $url, string $label, CTag $content): CTag {
+		$content->setAttribute('aria-label', $label);
 
 		if ($url === null) {
 			return $content;
 		}
 
-		return (new CTag('a', true, $content))
-			->setAttribute('href', $url->getUrl())
-			->setAttribute('aria-label', $title);
+		return (new CTag('a', true, $content))->setAttribute('href', $url->getUrl());
 	}
 
 	private static function nodeUrl(array $node): ?CUrl {
@@ -479,13 +751,27 @@ class ServiceMap {
 		}
 	}
 
+	/**
+	 * Vertical position of every node as laid out (columns are centered): row minus the middle of its column.
+	 */
+	private static function rowPositions(array $columns): array {
+		$y = [];
+
+		foreach ($columns as $ids) {
+			foreach ($ids as $row => $id) {
+				$y[$id] = $row - (count($ids) - 1) / 2;
+			}
+		}
+
+		return $y;
+	}
+
 	private static function hasRoots(array $services, string $name): bool {
 		return in_array($name, array_column($services, 'service'), true);
 	}
 
-	private static function summary(float $rpm, float $error_rate, ?float $p95): string {
-		return self::formatRate($rpm).'/min · '.sprintf('%.1f %%', $error_rate).
-			($p95 !== null ? ' · p95 '.ApmStats::formatDuration($p95) : '');
+	private static function errorRate(int $errors, int $requests): float {
+		return $requests > 0 ? $errors / $requests * 100 : 0.0;
 	}
 
 	private static function formatRate(float $rpm): string {

@@ -69,6 +69,8 @@ Los valores del template coinciden con ClickHouse para cada aplicación. Método
 | ![Cómo funciona](docs/screenshots/how-it-works.png) | ![Comprobaciones](docs/screenshots/how-it-works-checks.png) |
 | **Servicios del OpenTelemetry Demo** | **La tienda del OpenTelemetry Demo** |
 | ![Servicios](docs/screenshots/otel-demo-services.png) | ![Tienda](docs/screenshots/otel-demo-store.png) |
+| **Mapa de servicios: pasa el ratón por un servicio para seguir su camino** | **Widget del mapa en un dashboard** |
+| ![Camino de un servicio](docs/screenshots/service-map-hover.png) | ![Widget](docs/screenshots/service-map-widget.png) |
 
 Más: [experiencia del usuario](docs/screenshots/user-experience.png), [origen de la lentitud](docs/screenshots/origin-of-slowness-dark.png).
 
@@ -86,8 +88,10 @@ Más: [experiencia del usuario](docs/screenshots/user-experience.png), [origen d
 ## Qué responde cada pestaña
 
 - **Estado**: ¿llega la telemetría? Fuente de datos, conexión y registros por señal.
-- **Mapa de servicios**: usuarios → servicios → bases de datos y servicios externos, con llamadas/min, tasa de error y
-  p95 en cada flecha, colores de salud y clic para ir a cada servicio.
+- **Mapa de servicios**: el estado del sistema ahora (tráfico de entrada, tasa de error, servicio más lento, qué requiere
+  atención) y el flujo en vivo de los usuarios a los servicios, bases de datos y servicios externos: flechas coloreadas
+  por salud, tan gruesas como su tráfico y con partículas en movimiento; pasa el ratón por un servicio para seguir su
+  camino y ver sus cifras, haz clic para ver dónde se va su tiempo.
 - **Servicios / Endpoints**: métricas RED (tasa, errores, duración) con tendencias por minuto.
 - **Errores**: fallos agrupados por servicio, endpoint y mensaje, con veces, primera y última vez y la última traza.
 - **Experiencia del usuario**: Core Web Vitals (ver [docs/rum.md](docs/rum.md)), Apdex por servicio y endpoint, e

@@ -292,4 +292,20 @@ return [
 	'{$OTLP.NAMESPACE} is "%s"' => '{$OTLP.NAMESPACE} es "%s"',
 	'Services sending without service.namespace in the last 15 minutes (of any application): %s. If one belongs to this application, add the attribute (step 1).' => 'Servicios que envían sin service.namespace en los últimos 15 minutos (de cualquier aplicación): %s. Si alguno es de esta aplicación, añádele el atributo (paso 1).',
 	'These services have no application, so they have no Zabbix host: add service.namespace to them (step 1).' => 'Estos servicios no tienen aplicación, así que no tienen host en Zabbix: añádeles service.namespace (paso 1).',
+
+	// Service map: state of the system, tooltips and legend.
+	'%s errors' => '%s de errores',
+	'%s requests in the period' => '%s peticiones en el periodo',
+	'Called by: %d · Calls: %d' => 'Lo llaman: %d · Llama a: %d',
+	'Calls: %s (%s/min)' => 'Llamadas: %s (%s/min)',
+	'Errors: %s' => 'Errores: %s',
+	'Everything is healthy: no service or connection over the thresholds.' => 'Todo está sano: ningún servicio ni conexión supera los umbrales.',
+	'healthy / warning / problem' => 'sanos / atención / problema',
+	'Incoming traffic' => 'Tráfico de entrada',
+	'Needs attention' => 'Requiere atención',
+	'of the incoming requests' => 'de las peticiones de entrada',
+	'Requests: %s (%s/min)' => 'Peticiones: %s (%s/min)',
+	'Slowest dependency: %s (p95 %s)' => 'Dependencia más lenta: %s (p95 %s)',
+	'Slowest service' => 'Servicio más lento',
+	'Thickness = share of the traffic · moving dots = live flow (faster = more calls). Hover a service to follow its path; click it to see where its time goes.' => 'Grosor = parte del tráfico · puntos en movimiento = flujo en vivo (más rápido = más llamadas). Pasa el ratón por un servicio para seguir su camino; haz clic para ver dónde se va su tiempo.',
 ];

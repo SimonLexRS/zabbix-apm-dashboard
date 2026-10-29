@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0
+
+- Service map (page and widget) redrawn to be read at a glance: readable size (it scrolls instead of shrinking the text),
+  fewer crossing arrows (barycenter ordering), arrows colored by health and as thick as their share of the traffic,
+  moving particles showing the live flow (faster = more calls, red where there are errors; they stop with Pause and with
+  reduced motion), labels only on problem connections, nodes with a health bar, a kind icon and the guilty figure in
+  red. Hovering a service or an arrow lights its path and shows its figures.
+- Above the map, the state of the system now: incoming traffic, error rate, slowest service, healthy / warning /
+  problem services, and the services and connections that need attention, most severe first.
+
 ## 1.6.0
 
 - APM Overview, **How it works** is now an interactive guide to connect an application: fill in the application

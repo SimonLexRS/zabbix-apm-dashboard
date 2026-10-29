@@ -16,6 +16,7 @@ class CApmOverviewLive {
 		this._data_url = data_url;
 		this._labels = labels; // translated by the view (I18n)
 		this._interval = this._loadInterval();
+		this._markPaused();
 		this._updated = null;
 		this._attempted = null;
 		this._timeout = null;
@@ -78,6 +79,13 @@ class CApmOverviewLive {
 		}
 	}
 
+	/**
+	 * While paused, the service map stops its particles too (CSS: .apm-live-paused).
+	 */
+	_markPaused() {
+		document.body.classList.toggle('apm-live-paused', this._interval === 0);
+	}
+
 	_loadInterval() {
 		let value = null;
 
@@ -93,6 +101,7 @@ class CApmOverviewLive {
 
 	_setInterval(interval) {
 		this._interval = interval;
+		this._markPaused();
 
 		try {
 			localStorage.setItem(this._storage_key, String(interval));
@@ -394,3 +403,154 @@ class CApmOverviewGuide {
 		}
 	}
 }
+
+/*
+ * Service map interaction, for the APM overview page and the APM service map widget: hovering a node or an arrow lights
+ * its path (connected arrows and nodes) and shows its figures. Delegated on the document, so it also works for maps
+ * replaced by the real-time refresh. Tooltip texts come from data-tip-title / data-tip and are written as text.
+ */
+class CApmServiceMapInteraction {
+
+	static init() {
+		if (CApmServiceMapInteraction._instance === undefined) {
+			CApmServiceMapInteraction._instance = new CApmServiceMapInteraction();
+		}
+	}
+
+	constructor() {
+		this._tip = null;
+		this._current = null;
+
+		document.addEventListener('mouseover', (e) => this._over(e));
+		document.addEventListener('mouseout', (e) => this._out(e));
+		document.addEventListener('mousemove', (e) => this._move(e));
+		document.addEventListener('focusin', (e) => this._over(e));
+		document.addEventListener('focusout', (e) => this._out(e));
+	}
+
+	_element(target) {
+		return target instanceof Element ? target.closest('.apm-map-svg [data-apm-node], .apm-map-svg [data-apm-edge]') : null;
+	}
+
+	_over(e) {
+		const element = this._element(e.target);
+
+		if (element === null || element === this._current) {
+			return;
+		}
+
+		this._clear();
+		this._current = element;
+
+		const svg = element.closest('.apm-map-svg');
+		const lit = new Set([element]);
+
+		if (element.dataset.apmNode !== undefined) {
+			const id = element.dataset.apmNode;
+
+			for (const edge of svg.querySelectorAll('[data-apm-edge]')) {
+				if (edge.dataset.from === id || edge.dataset.to === id) {
+					lit.add(edge);
+					lit.add(this._node(svg, edge.dataset.from === id ? edge.dataset.to : edge.dataset.from));
+				}
+			}
+		}
+		else {
+			lit.add(this._node(svg, element.dataset.from));
+			lit.add(this._node(svg, element.dataset.to));
+		}
+
+		svg.classList.add('apm-map-tracing');
+
+		for (const item of lit) {
+			if (item !== null) {
+				item.classList.add('apm-map-lit');
+			}
+		}
+
+		this._show(element, e);
+	}
+
+	_out(e) {
+		const element = this._element(e.target);
+
+		if (element === null || element !== this._current || element.contains(e.relatedTarget)) {
+			return;
+		}
+
+		this._clear();
+	}
+
+	_move(e) {
+		if (this._tip !== null && this._current !== null) {
+			this._place(e.clientX, e.clientY);
+		}
+	}
+
+	_clear() {
+		if (this._current !== null) {
+			const svg = this._current.closest('.apm-map-svg');
+
+			if (svg !== null) {
+				svg.classList.remove('apm-map-tracing');
+
+				for (const item of svg.querySelectorAll('.apm-map-lit')) {
+					item.classList.remove('apm-map-lit');
+				}
+			}
+		}
+
+		this._current = null;
+
+		if (this._tip !== null) {
+			this._tip.remove();
+			this._tip = null;
+		}
+	}
+
+	_node(svg, id) {
+		return svg.querySelector('[data-apm-node="' + CSS.escape(id) + '"]');
+	}
+
+	_show(element, e) {
+		const tip = document.createElement('div');
+		const title = document.createElement('strong');
+
+		tip.className = 'apm-map-tip';
+		title.textContent = element.dataset.tipTitle ?? '';
+		tip.appendChild(title);
+
+		for (const line of (element.dataset.tip ?? '').split('\n')) {
+			if (line !== '') {
+				const row = document.createElement('div');
+
+				row.textContent = line;
+				tip.appendChild(row);
+			}
+		}
+
+		document.body.appendChild(tip);
+		this._tip = tip;
+
+		if (e.type === 'focusin') {
+			const box = element.getBoundingClientRect();
+
+			this._place(box.right, box.top);
+		}
+		else {
+			this._place(e.clientX, e.clientY);
+		}
+	}
+
+	_place(x, y) {
+		const margin = 14;
+		const box = this._tip.getBoundingClientRect();
+		const left = x + margin + box.width > window.innerWidth ? x - margin - box.width : x + margin;
+		const top = y + margin + box.height > window.innerHeight ? y - margin - box.height : y + margin;
+
+		this._tip.style.left = Math.max(0, left) + 'px';
+		this._tip.style.top = Math.max(0, top) + 'px';
+	}
+}
+
+CApmServiceMapInteraction.init();

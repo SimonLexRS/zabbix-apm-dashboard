@@ -65,6 +65,8 @@ match ClickHouse per application. Method, results and how to repeat it: [docs/ve
 | ![How it works](docs/screenshots/how-it-works.png) | ![Checks](docs/screenshots/how-it-works-checks.png) |
 | **Services of the OpenTelemetry Demo** | **The OpenTelemetry Demo store** |
 | ![Services](docs/screenshots/otel-demo-services.png) | ![Store](docs/screenshots/otel-demo-store.png) |
+| **Service map: hover a service to follow its path** | **Service map widget on a dashboard** |
+| ![Path of a service](docs/screenshots/service-map-hover.png) | ![Widget](docs/screenshots/service-map-widget.png) |
 
 More: [user experience](docs/screenshots/user-experience.png), [origin of slowness](docs/screenshots/origin-of-slowness-dark.png).
 
@@ -82,8 +84,10 @@ More: [user experience](docs/screenshots/user-experience.png), [origin of slowne
 ## What each tab answers
 
 - **Status**: is telemetry arriving? Data source, connection and rows per signal.
-- **Service map**: users → services → databases and external services, with calls/min, error rate and p95 on every
-  arrow, health colors, and click-through to each service.
+- **Service map**: the state of the system now (incoming traffic, error rate, slowest service, what needs attention)
+  and the live flow from users to services, databases and external services: arrows colored by health, as thick as their
+  traffic, with moving particles; hover a service to follow its path and see its figures, click it to see where its time
+  goes.
 - **Services / Endpoints**: RED metrics (rate, errors, duration) with per-minute trends.
 - **Errors**: failures grouped by service, endpoint and message, with counts, first/last seen and the latest trace.
 - **User experience**: Core Web Vitals (see [docs/rum.md](docs/rum.md)), Apdex per service and endpoint, latency

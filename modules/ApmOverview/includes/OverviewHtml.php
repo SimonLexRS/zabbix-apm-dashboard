@@ -296,6 +296,65 @@ class OverviewHtml {
 	}
 
 	/**
+	 * State of the system now, above the map: entry traffic, errors, the slowest service, health counts and what needs
+	 * attention (ServiceMap::summary()).
+	 */
+	private static function mapSummary(array $summary): CDiv {
+		$card = static fn(string $label, $value, string $note, ?string $class = null): CDiv => (new CDiv([
+			(new CDiv($label))->addClass(ZBX_STYLE_GREY),
+			(new CDiv($value))->addClass('apm-map-kpi-value')->addClass($class),
+			(new CDiv($note))->addClass(ZBX_STYLE_GREY)
+		]))->addClass('apm-map-kpi');
+
+		$error_class = $summary['error_rate'] >= self::ERROR_RATE_HIGH
+			? 'apm-map-kpi-bad'
+			: ($summary['error_rate'] >= self::ERROR_RATE_WARNING ? 'apm-map-kpi-warn' : null);
+
+		$health = $summary['health'];
+		$cards = (new CDiv([
+			$card(I18n::t('Incoming traffic'), self::formatRate($summary['rpm']).'/min',
+				sprintf(I18n::t('%s requests in the period'), self::formatCount($summary['requests']))
+			),
+			$card(I18n::t('Error rate'), sprintf('%.2f %%', $summary['error_rate']), I18n::t('of the incoming requests'),
+				$error_class
+			),
+			$card(I18n::t('Slowest service'),
+				$summary['slowest'] !== null ? 'p95 '.ServiceMap::shortDuration($summary['slowest']['p95']) : '—',
+				$summary['slowest'] !== null ? $summary['slowest']['name'] : ''
+			),
+			$card(I18n::t('Services'), [
+				(new CSpan($health['ok']))->addClass('apm-map-kpi-ok'), ' / ',
+				(new CSpan($health['warn']))->addClass('apm-map-kpi-warn'), ' / ',
+				(new CSpan($health['bad']))->addClass('apm-map-kpi-bad')
+			], I18n::t('healthy / warning / problem'))
+		]))->addClass('apm-map-kpis');
+
+		$attention = (new CTag('ul', true))->addClass('apm-map-attention');
+
+		foreach ($summary['attention'] as $item) {
+			$attention->addItem(new CTag('li', true, [
+				(new CSpan())->addClass('apm-map-dot')->addClass('apm-map-'.$item['severity']),
+				$item['service'] !== null
+					? new CLink($item['label'], ServiceMap::getServiceUrl($item['service']))
+					: new CSpan($item['label']),
+				(new CSpan(': '.$item['reason']))->addClass(ZBX_STYLE_GREY)
+			]));
+		}
+
+		if (!$summary['attention']) {
+			$attention->addItem(new CTag('li', true, [
+				(new CSpan())->addClass('apm-map-dot')->addClass('apm-map-ok'),
+				I18n::t('Everything is healthy: no service or connection over the thresholds.')
+			]));
+		}
+
+		return (new CDiv([
+			$cards,
+			(new CDiv([new CTag('h5', true, I18n::t('Needs attention')), $attention]))->addClass('apm-map-attention-box')
+		]))->addClass('apm-map-summary');
+	}
+
+	/**
 	 * Service map with the list of its connections.
 	 */
 	public static function map(array $data, array $ctx): CDiv {
@@ -344,6 +403,7 @@ class OverviewHtml {
 				I18n::t(' (page filter) and its connections. The rest of the application is dimmed. '),
 				new CLink(I18n::t('Clear filter'), self::getClearFilterUrl(self::TAB_MAP))
 			]))->addClass('apm-overview-hint') : null,
+			$graph['nodes'] ? self::mapSummary(ServiceMap::summary($graph)) : null,
 			ServiceMap::render($graph, $ctx),
 			$ctx['join_capped'] ? self::hint(sprintf(
 				I18n::t('Calls between services and to their dependencies are calculated over the last %d h of the period.'),
@@ -1193,6 +1253,10 @@ class OverviewHtml {
 
 	private static function formatTime(int $clock): string {
 		return zbx_date2str(date('Ymd', $clock) === date('Ymd') ? 'H:i:s' : DATE_TIME_FORMAT_SECONDS, $clock);
+	}
+
+	private static function formatRate(float $rpm): string {
+		return $rpm >= 10 ? (string) round($rpm) : sprintf('%.1f', $rpm);
 	}
 
 	private static function formatCount(int $value): string {

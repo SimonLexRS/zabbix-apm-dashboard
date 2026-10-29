@@ -235,31 +235,99 @@
 	cursor: pointer;
 }
 
+.apm-map-svg .apm-map-node,
+.apm-map-svg .apm-map-edge,
+.apm-map-edge-label {
+	transition: opacity 0.15s;
+}
+
+/* Edges: color by health, width by share of the traffic (set by ServiceMap), moving particles on top. */
 .apm-map-edge path {
 	fill: none;
-	stroke: #8a99a6;
-	opacity: 0.75;
 }
 
-.apm-map-edge.apm-map-warn path {
+.apm-map-line {
+	stroke: #3db87a;
+	opacity: 0.45;
+}
+
+.apm-map-edge.apm-map-warn .apm-map-line {
 	stroke: #ffb625;
+	opacity: 0.6;
 }
 
-.apm-map-edge.apm-map-bad path {
+.apm-map-edge.apm-map-bad .apm-map-line {
 	stroke: #e45959;
+	opacity: 0.7;
 }
 
-.apm-map-svg a:hover .apm-map-edge path,
-.apm-map-svg a:focus .apm-map-edge path {
-	opacity: 1;
+.apm-map-flow {
+	stroke: #59db8f;
+	stroke-linecap: round;
+	stroke-dasharray: 0.1 13.9;
+	animation: apm-map-flow 1.4s linear infinite;
+	pointer-events: none;
 }
 
-#apm-map-arrow path {
-	fill: #8a99a6;
+.apm-map-edge.apm-map-warn .apm-map-flow {
+	stroke: #ffc94d;
+}
+
+.apm-map-edge.apm-map-erroring .apm-map-flow,
+.apm-map-edge.apm-map-bad .apm-map-flow {
+	stroke: #ff6b6b;
+}
+
+.apm-map-flow-medium .apm-map-flow {
+	animation-duration: 0.8s;
+}
+
+.apm-map-flow-fast .apm-map-flow {
+	animation-duration: 0.45s;
+}
+
+@keyframes apm-map-flow {
+	from {
+		stroke-dashoffset: 14;
+	}
+
+	to {
+		stroke-dashoffset: 0;
+	}
+}
+
+/* Real time paused (apm-overview.js) or reduced motion: the particles stop. */
+.apm-live-paused .apm-map-flow {
+	animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.apm-map-flow {
+		animation: none;
+	}
+}
+
+.apm-map-arrow.apm-map-ok path {
+	fill: #3db87a;
+}
+
+.apm-map-arrow.apm-map-warn path {
+	fill: #ffb625;
+}
+
+.apm-map-arrow.apm-map-bad path {
+	fill: #e45959;
+}
+
+.apm-map-svg a:hover .apm-map-line,
+.apm-map-svg a:focus .apm-map-line {
+	opacity: 0.9;
 }
 
 .apm-map-edge-label {
 	font-size: 11px;
+	font-weight: bold;
+	fill: #e45959 !important;
 	paint-order: stroke;
 	stroke: #ffffff;
 	stroke-width: 4px;
@@ -271,48 +339,77 @@ html[color-scheme="dark"] .apm-map-edge-label {
 	stroke: #2b2b2b;
 }
 
-.apm-map-node rect {
-	fill: rgba(128, 128, 128, 0.08);
-	stroke: #59db8f;
-	stroke-width: 2;
+/* Nodes: card, health bar, kind icon, name and one line of figures. */
+/* Opaque: arrows that pass behind a node do not show through it. */
+.apm-map-card {
+	fill: #ffffff;
+	stroke: rgba(128, 128, 128, 0.55);
+	stroke-width: 1;
 }
 
-.apm-map-node.apm-map-warn rect {
+html[color-scheme="dark"] .apm-map-card {
+	fill: #383838;
+}
+
+.apm-map-bar {
+	fill: #59db8f;
+}
+
+.apm-map-node.apm-map-warn .apm-map-bar {
+	fill: #ffb625;
+}
+
+.apm-map-node.apm-map-bad .apm-map-bar {
+	fill: #e45959;
+}
+
+.apm-map-node.apm-map-neutral .apm-map-bar {
+	fill: #3b82f6;
+}
+
+.apm-map-node.apm-map-warn .apm-map-card {
 	stroke: #ffb625;
-	fill: rgba(255, 182, 37, 0.1);
+	fill: #fff6e0;
 }
 
-.apm-map-node.apm-map-bad rect {
+.apm-map-node.apm-map-bad .apm-map-card {
 	stroke: #e45959;
-	fill: rgba(228, 89, 89, 0.12);
+	fill: #fdeaea;
 }
 
-.apm-map-node.apm-map-neutral rect {
-	stroke: #3b82f6;
+html[color-scheme="dark"] .apm-map-node.apm-map-warn .apm-map-card {
+	fill: #4a4128;
 }
 
-.apm-map-kind-database rect,
-.apm-map-kind-external rect {
+html[color-scheme="dark"] .apm-map-node.apm-map-bad .apm-map-card {
+	fill: #4d3030;
+}
+
+.apm-map-kind-database .apm-map-card,
+.apm-map-kind-external .apm-map-card {
 	stroke-dasharray: 5 3;
 }
 
-.apm-map-svg a:hover .apm-map-node rect,
-.apm-map-svg a:focus .apm-map-node rect {
+.apm-map-icon {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.4;
+	stroke-linejoin: round;
+	opacity: 0.75;
+}
+
+.apm-map-kind-users .apm-map-icon {
+	fill: currentColor;
+	stroke: none;
+}
+
+.apm-map-svg a:hover .apm-map-card,
+.apm-map-svg a:focus .apm-map-card {
+	stroke-width: 2.5;
+}
+
+.apm-map-node.apm-map-focus .apm-map-card {
 	stroke-width: 3;
-}
-
-.apm-map-svg .apm-map-dim {
-	opacity: 0.45;
-}
-
-.apm-map-node.apm-map-focus rect {
-	stroke-width: 4;
-}
-
-.apm-map-node-kind {
-	font-size: 9px;
-	letter-spacing: 0.06em;
-	opacity: 0.65;
 }
 
 .apm-map-node-name {
@@ -325,6 +422,55 @@ html[color-scheme="dark"] .apm-map-edge-label {
 	opacity: 0.85;
 }
 
+.apm-map-hot {
+	fill: #e45959 !important;
+	font-weight: bold;
+}
+
+/* Page filter: the rest is dimmed. Hover (apm-map-tracing): only the path of the hovered element stays. */
+.apm-map-svg .apm-map-dim {
+	opacity: 0.35;
+}
+
+.apm-map-svg.apm-map-tracing .apm-map-node,
+.apm-map-svg.apm-map-tracing .apm-map-edge,
+.apm-map-svg.apm-map-tracing .apm-map-edge-label {
+	opacity: 0.12;
+}
+
+.apm-map-svg.apm-map-tracing .apm-map-lit {
+	opacity: 1;
+}
+
+.apm-map-svg.apm-map-tracing .apm-map-edge.apm-map-lit .apm-map-line {
+	opacity: 0.85;
+}
+
+.apm-map-tip {
+	position: fixed;
+	z-index: 10000;
+	max-width: 340px;
+	padding: 8px 10px;
+	border: 1px solid rgba(128, 128, 128, 0.5);
+	border-radius: 4px;
+	background: #ffffff;
+	color: #1f2c33;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+	font-size: 12px;
+	line-height: 1.5;
+	pointer-events: none;
+}
+
+html[color-scheme="dark"] .apm-map-tip {
+	background: #383838;
+	color: #f2f2f2;
+}
+
+.apm-map-tip strong {
+	display: block;
+	margin-bottom: 2px;
+}
+
 .apm-map-legend {
 	display: flex;
 	flex-wrap: wrap;
@@ -332,6 +478,64 @@ html[color-scheme="dark"] .apm-map-edge-label {
 	margin-top: 10px;
 	line-height: 1.4;
 	color: #768d99;
+}
+
+/* State of the system above the map. */
+.apm-map-summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.apm-map-kpis {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(150px, 1fr));
+	gap: 10px;
+	flex: 3 1 420px;
+}
+
+.apm-map-kpi {
+	padding: 8px 12px;
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	border-radius: 4px;
+	line-height: 1.4;
+}
+
+.apm-map-kpi-value {
+	font-size: 20px;
+	font-weight: bold;
+}
+
+.apm-map-kpi-ok {
+	color: #3db87a;
+}
+
+.apm-map-kpi-warn {
+	color: #e8a000;
+}
+
+.apm-map-kpi-bad {
+	color: #e45959;
+}
+
+.apm-map-attention-box {
+	flex: 2 1 320px;
+	padding: 8px 12px;
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	border-radius: 4px;
+}
+
+.apm-map-attention-box h5 {
+	margin: 0 0 6px;
+	font-weight: bold;
+}
+
+.apm-map-attention {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	line-height: 1.7;
 }
 
 .apm-map-dot {

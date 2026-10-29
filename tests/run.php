@@ -102,6 +102,45 @@ namespace Modules\ApmOverview\Includes {
 	check('health warn', ServiceMap::health(1.0, null, ServiceMap::DEFAULT_THRESHOLDS), 'warn');
 	check('health bad by p95', ServiceMap::health(0.0, 4e9, ServiceMap::DEFAULT_THRESHOLDS), 'bad');
 
+	// Map drawing: width by share of the busiest edge, particle speed by calls per minute.
+	check('edge width busiest', ServiceMap::edgeWidth(100, 100), 8.0);
+	check('edge width idle', ServiceMap::edgeWidth(0, 100), 1.5);
+	check('edge width without traffic', ServiceMap::edgeWidth(5, 0), 1.5);
+	check('flow speed', [ServiceMap::flowSpeed(1), ServiceMap::flowSpeed(10), ServiceMap::flowSpeed(600)],
+		['slow', 'medium', 'fast']
+	);
+	check('short durations', array_map([ServiceMap::class, 'shortDuration'], [4e5, 2.614e7, 1.53e9, 6.4826e10]),
+		['0.4ms', '26ms', '1.5s', '1m 5s']
+	);
+
+	// State of the system: entry traffic and errors, slowest service, health counts, problems before warnings.
+	$summary = ServiceMap::summary($graph);
+	check('summary requests', $summary['requests'], 660);
+	check('summary rpm', $summary['rpm'], 11.0);
+	check('summary error rate', round($summary['error_rate'], 2), 0.91);
+	check('summary slowest', $summary['slowest']['name'], 'web');
+	check('summary health', $summary['health'], ['ok' => 1, 'warn' => 1, 'bad' => 0]);
+	check('summary attention order', array_column($summary['attention'], 'label'), ['web → pay.example.com', 'web']);
+	check('summary attention severity', array_column($summary['attention'], 'severity'), ['bad', 'warn']);
+
+	// Barycenter ordering removes the crossing of a → y / b → x and is deterministic.
+	$order_nodes = [
+		'u' => ['layer' => 0, 'requests' => 10, 'name' => 'u'],
+		'a' => ['layer' => 1, 'requests' => 9, 'name' => 'a'],
+		'b' => ['layer' => 1, 'requests' => 8, 'name' => 'b'],
+		'x' => ['layer' => 2, 'requests' => 7, 'name' => 'x'],
+		'y' => ['layer' => 2, 'requests' => 6, 'name' => 'y']
+	];
+	$order_edges = [['from' => 'u', 'to' => 'a'], ['from' => 'u', 'to' => 'b'], ['from' => 'a', 'to' => 'y'],
+		['from' => 'b', 'to' => 'x']
+	];
+	check('crossings before', ServiceMap::crossings([0 => ['u'], 1 => ['a', 'b'], 2 => ['x', 'y']], $order_nodes,
+		$order_edges
+	), 1);
+	$ordered = ServiceMap::orderColumns($order_nodes, $order_edges);
+	check('crossings after ordering', ServiceMap::crossings($ordered, $order_nodes, $order_edges), 0);
+	check('ordering deterministic', ServiceMap::orderColumns($order_nodes, $order_edges), $ordered);
+
 	// Translations: Spanish by catalog, English as is.
 	I18n::setLanguage('es');
 	check('es', I18n::t('Service map'), 'Mapa de servicios');
