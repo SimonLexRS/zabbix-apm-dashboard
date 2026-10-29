@@ -58,9 +58,10 @@ class WidgetView extends CControllerDashboardWidgetView {
 			$time_from = $this->fields_values['time_period']['from_ts'];
 			$time_till = $this->fields_values['time_period']['to_ts'];
 			$service = $this->fields_values['service'];
+			$application = trim($this->fields_values['application']);
 
 			try {
-				$stats = new ApmStats();
+				$stats = (new ApmStats())->setApplication($application !== '' ? $application : null);
 				[$call_from, $call_till] = ApmStats::joinWindow($time_from, $time_till);
 
 				$data['graph'] = ServiceMap::build(

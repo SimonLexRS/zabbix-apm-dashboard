@@ -48,6 +48,8 @@ Full guide, including the collector, ClickHouse users and the template: [docs/in
 
 ## What each tab answers
 
+The page shows one application at a time: pick it in the tabs at the top (one per `service.namespace`).
+
 - **Status**: is telemetry arriving? Data source, connection and rows per signal.
 - **Service map**: what the application is made of: users → services → databases and external services, with
   calls/min, error rate and p95 on every arrow, health colors, and click-through to each service.

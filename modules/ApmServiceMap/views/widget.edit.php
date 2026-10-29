@@ -11,6 +11,10 @@ use Modules\ApmServiceMap\Includes\Lang as I18n;
 
 (new CWidgetFormView($data))
 	->addField(
+		(new CWidgetFieldTextBoxView($data['fields']['application']))
+			->setPlaceholder(I18n::t('all applications, e.g. flowspock (service.namespace)'))
+	)
+	->addField(
 		(new CWidgetFieldTextBoxView($data['fields']['service']))->setPlaceholder(I18n::t('all; e.g. checkout or demo-*'))
 	)
 	->addFieldset(

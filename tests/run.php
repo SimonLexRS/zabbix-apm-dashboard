@@ -36,6 +36,12 @@ namespace Modules\ApmOverview\Includes {
 	check('like exact', ApmStats::toLikePattern('=api'), 'api');
 	check('like escapes _', ApmStats::toLikePattern('=my_api'), 'my\\_api');
 
+	// Application tab: the stored one while it has data, otherwise the first; '' (no namespace) is an application.
+	check('app stored', ApmStats::resolveApplication(['apm-demo', 'flowspock'], 'flowspock'), 'flowspock');
+	check('app gone falls back to first', ApmStats::resolveApplication(['apm-demo', 'flowspock'], 'old'), 'apm-demo');
+	check('app no namespace', ApmStats::resolveApplication(['', 'flowspock'], ''), '');
+	check('app none', ApmStats::resolveApplication([], 'flowspock'), null);
+
 	check('matches substring', ServiceMap::matches('flowspock-api', 'spock'), true);
 	check('matches wildcard', ServiceMap::matches('demo-backend', 'demo-*'), true);
 	check('matches wildcard miss', ServiceMap::matches('backend-demo', 'demo-*'), false);

@@ -40,6 +40,9 @@ class WidgetForm extends CWidgetForm {
 	public function addFields(): self {
 		return $this
 			->addField(
+				(new CWidgetFieldTextBox('application', I18n::t('Application')))->setMaxLength(255)
+			)
+			->addField(
 				(new CWidgetFieldTextBox('service', I18n::t('Service name')))->setMaxLength(255)
 			)
 			->addField(

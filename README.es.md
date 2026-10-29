@@ -42,6 +42,8 @@ Guía completa, con el colector, los usuarios de ClickHouse y el template: [docs
 
 ## Qué responde cada pestaña
 
+La página muestra una aplicación a la vez: se elige en las pestañas de arriba (una por `service.namespace`).
+
 - **Estado**: ¿llega la telemetría? Fuente de datos, conexión y registros por señal.
 - **Mapa de servicios**: de qué está hecha la aplicación: usuarios → servicios → bases de datos y servicios externos,
   con llamadas/min, tasa de error y p95 en cada flecha, colores de salud y clic para ir a cada servicio.

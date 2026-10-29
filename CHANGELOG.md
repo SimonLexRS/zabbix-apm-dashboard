@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+- APM Overview: one tab per application (`service.namespace`) above the filter, so applications are never mixed. The
+  selected application is remembered and applies to every tab, the real-time refresh and the service suggestions;
+  changing it clears the service filter. Spans without a namespace get their own "No application" tab, shown last.
+- APM service health and APM service map widgets: new "Application" field (`service.namespace`); empty = all.
+
 ## 1.3.1
 
 - Zabbix 8.0.0rc3 support: ClickHouse query parameters are passed with their type (`[type, value]`), as rc3 requires.

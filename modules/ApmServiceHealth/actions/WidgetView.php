@@ -47,13 +47,15 @@ class WidgetView extends CControllerDashboardWidgetView {
 					$this->fields_values['time_period']['to_ts'],
 					$this->fields_values['service'],
 					$this->fields_values['sort_by'],
-					$this->fields_values['show_lines']
+					$this->fields_values['show_lines'],
+					trim($this->fields_values['application'])
 				);
 
 				$data['series'] = ServiceStats::getRequestSeries(
 					$this->fields_values['time_period']['from_ts'],
 					$this->fields_values['time_period']['to_ts'],
-					array_column($data['services'], 'service')
+					array_column($data['services'], 'service'),
+					trim($this->fields_values['application'])
 				);
 			}
 			catch (DBException $e) {

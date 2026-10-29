@@ -33,6 +33,7 @@ class Overview extends CController {
 
 	protected function checkInput(): bool {
 		$ret = $this->validateInput([
+			'filter_app' => 'string',
 			'filter_service' => 'string',
 			'filter_sort' => 'in '.implode(',', [ApmStats::SORT_REQUESTS, ApmStats::SORT_ERROR_RATE, ApmStats::SORT_P95]),
 			'filter_apdex' => 'int32',
@@ -57,6 +58,12 @@ class Overview extends CController {
 
 	protected function doAction(): void {
 		if ($this->hasInput('filter_set')) {
+			// Another application: the service filter of the previous one does not apply.
+			if ($this->hasInput('filter_app')) {
+				CProfile::update(self::PROFILE_IDX.'.filter_app', $this->getInput('filter_app'), PROFILE_TYPE_STR);
+				CProfile::delete(self::PROFILE_IDX.'.filter_service');
+			}
+
 			// Only what was sent: a link from the service map changes the service and keeps the rest.
 			if ($this->hasInput('filter_service')) {
 				CProfile::update(self::PROFILE_IDX.'.filter_service', trim($this->getInput('filter_service')),
@@ -80,7 +87,26 @@ class Overview extends CController {
 			CProfile::delete(self::PROFILE_IDX.'.filter_apdex');
 		}
 
+		// The applications are listed here only, the real-time refresh (apm.overview.data) reads the stored one.
+		try {
+			$stats = new ApmStats();
+			$applications = $stats->getApplications();
+		}
+		catch (\DBException $e) {
+			$stats = null;
+			$applications = [];
+		}
+
+		$application = ApmStats::resolveApplication($applications,
+			(string) CProfile::get(self::PROFILE_IDX.'.filter_app', '')
+		);
+
+		if ($application !== null) {
+			CProfile::update(self::PROFILE_IDX.'.filter_app', $application, PROFILE_TYPE_STR);
+		}
+
 		$filter = self::getFilter($this->getInput('endpoint_service', ''));
+		$filter['application'] = $application;
 
 		$timeselector_options = [
 			'profileIdx' => self::PROFILE_IDX.'.filter',
@@ -102,13 +128,14 @@ class Overview extends CController {
 
 		// Suggestions of the service filter; the page works without them.
 		try {
-			$service_names = (new ApmStats())->getServiceNames();
+			$service_names = $stats !== null ? $stats->setApplication($application)->getServiceNames() : [];
 		}
 		catch (\DBException $e) {
 			$service_names = [];
 		}
 
 		$response = new CControllerResponseData([
+			'applications' => $applications,
 			'service_names' => $service_names,
 			'filter' => $filter,
 			'filter_options' => [
@@ -127,10 +154,12 @@ class Overview extends CController {
 	}
 
 	/**
-	 * Page filter stored in the user profile, plus the exact service of the Endpoints tab.
+	 * Page filter stored in the user profile, plus the exact service of the Endpoints tab. "application" is null until
+	 * the page has resolved one (no applications with data).
 	 */
 	public static function getFilter(string $endpoint_service): array {
 		return [
+			'application' => CProfile::get(self::PROFILE_IDX.'.filter_app'),
 			'service' => CProfile::get(self::PROFILE_IDX.'.filter_service', ''),
 			'sort' => CProfile::get(self::PROFILE_IDX.'.filter_sort', ApmStats::SORT_REQUESTS),
 			'apdex_ms' => (int) CProfile::get(self::PROFILE_IDX.'.filter_apdex', self::APDEX_DEFAULT),

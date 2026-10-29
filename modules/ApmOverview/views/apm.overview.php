@@ -229,12 +229,39 @@ if ($data['selected_tab'] !== null) {
 	$tabs->setSelected($data['selected_tab']);
 }
 
+// One tab per application (service.namespace): the page never mixes them. Without "tab" in the link the content tab
+// of this browser session is kept.
+$app_tabs = null;
+
+if ($data['applications']) {
+	$app_tabs = (new CList())->addClass('apm-app-tabs');
+
+	foreach ($data['applications'] as $application) {
+		$label = $application !== '' ? $application : I18n::t('No application');
+
+		if ($application === $data['filter']['application']) {
+			$app_tabs->addItem((new CSpan($label))->setAttribute('aria-current', 'page'), 'apm-app-tab-active');
+		}
+		else {
+			$app_tabs->addItem(new CLink($label, (new CUrl('zabbix.php'))
+				->setArgument('action', 'apm.overview')
+				->setArgument('filter_set', 1)
+				->setArgument('filter_app', $application)
+				->getUrl()
+			));
+		}
+	}
+
+	$app_tabs = (new CTag('nav', true, $app_tabs))->setAttribute('aria-label', I18n::t('Applications'));
+}
+
 (new CHtmlPage())
 	->setTitle(I18n::t('APM overview'))
 	->setDocUrl('https://www.zabbix.com/documentation/8.0/en/manual/web_interface/frontend_sections/apm')
 	->setControls(
 		(new CTag('nav', true, $live_control))->setAttribute('aria-label', I18n::t('Content controls'))
 	)
+	->addItem($app_tabs)
 	->addItem($filter)
 	->addItem($service_names)
 	->addItem((new CDiv([$service_note, $tabs]))->addClass('apm-overview'))

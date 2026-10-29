@@ -64,13 +64,53 @@ class ApmStats {
 	// Period condition, with the {time_from} and {time_till} parameters.
 	private const PERIOD = 'Timestamp>=toDateTime64({time_from:Int32},9) AND Timestamp<toDateTime64({time_till:Int32},9)';
 
+	private const APPLICATION_CONDITION = 'ResourceAttributes[\'service.namespace\']={app:String}';
+
 	private ApmDbClickHouse $db;
+
+	/**
+	 * Application (service.namespace) the statistics are limited to; null = all applications.
+	 */
+	private ?string $application = null;
 
 	/**
 	 * @throws \DBException  If APM data source is not configured or not reachable.
 	 */
 	public function __construct() {
 		$this->db = ApmDbClickHouse::getInstance(ApmDb::getInstance()->getConfig());
+	}
+
+	public function setApplication(?string $application): self {
+		$this->application = $application;
+
+		return $this;
+	}
+
+	/**
+	 * Applications (service.namespace values) with spans in the last $seconds, by name; '' (spans without a namespace)
+	 * last, so it is never the default tab.
+	 *
+	 * @return string[]
+	 */
+	public function getApplications(int $seconds = 7 * SEC_PER_DAY): array {
+		$sql = 'SELECT DISTINCT ResourceAttributes[\'service.namespace\'] AS app FROM otel_traces'.
+			' WHERE Timestamp>=now()-{seconds:UInt32}'.
+			' ORDER BY app=\'\', app';
+
+		return array_map(static fn(array $row): string => (string) $row['app'],
+			iterator_to_array($this->db->fetch($sql, ['seconds' => ['UInt32', $seconds]]), false)
+		);
+	}
+
+	/**
+	 * The stored application if it still has data, otherwise the first one; null if there are no applications.
+	 */
+	public static function resolveApplication(array $applications, string $stored): ?string {
+		if (in_array($stored, $applications, true)) {
+			return $stored;
+		}
+
+		return $applications ? reset($applications) : null;
 	}
 
 	public function getServerVersion(): string {
@@ -84,12 +124,14 @@ class ApmStats {
 	 */
 	public function getServiceNames(int $seconds = SEC_PER_DAY, int $limit = 200): array {
 		$sql = 'SELECT DISTINCT ServiceName AS service FROM otel_traces'.
-			' WHERE Timestamp>=now()-{seconds:UInt32}'.
+			' WHERE Timestamp>=now()-{seconds:UInt32}'.$this->applicationCondition().
 			' ORDER BY service'.
 			' LIMIT '.$limit;
 
 		return array_map(static fn(array $row): string => (string) $row['service'],
-			iterator_to_array($this->db->fetch($sql, ['seconds' => ['UInt32', $seconds]]), false)
+			iterator_to_array(
+				$this->db->fetch($sql, ['seconds' => ['UInt32', $seconds]] + $this->applicationParams()), false
+			)
 		);
 	}
 
@@ -111,6 +153,8 @@ class ApmStats {
 					->from($table)
 					->where($time_column.'>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
 					->where($time_column.'<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]]);
+
+				$this->whereApplication($query);
 
 				try {
 					$row = $this->db->fetch($query->getSql(), $query->getParams())->current();
@@ -153,6 +197,8 @@ class ApmStats {
 			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]])
 			->where('ParentSpanId=\'\'')
 			->group('ServiceName');
+
+		$this->whereApplication($query);
 
 		if ($service !== '') {
 			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', self::toLikePattern($service)]]);
@@ -204,6 +250,8 @@ class ApmStats {
 			->where('ParentSpanId=\'\'')
 			->group('ServiceName')
 			->group('bucket');
+
+		$this->whereApplication($query);
 
 		if ($service !== '') {
 			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', self::toLikePattern($service)]]);
@@ -264,6 +312,8 @@ class ApmStats {
 			->group('ServiceName')
 			->group('SpanName');
 
+		$this->whereApplication($query);
+
 		if ($service !== '') {
 			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', self::toLikePattern($service)]]);
 		}
@@ -307,7 +357,7 @@ class ApmStats {
 				' toUnixTimestamp(min(Timestamp)) AS first, toUnixTimestamp(max(Timestamp)) AS last,'.
 				' arraySort(groupUniqArray(5)('.self::HTTP_STATUS.')) AS codes, argMax(TraceId,Timestamp) AS traceid'.
 			' FROM otel_traces'.
-			' WHERE '.self::PERIOD.' AND StatusCode=\'Error\' AND (ParentSpanId=\'\' OR SpanKind=\'Server\')'.
+			' WHERE '.$this->period().' AND StatusCode=\'Error\' AND (ParentSpanId=\'\' OR SpanKind=\'Server\')'.
 				self::serviceCondition($service).
 			' GROUP BY service, endpoint, message'.
 			' ORDER BY last DESC, count DESC'.
@@ -346,12 +396,12 @@ class ApmStats {
 				'SELECT TraceId, SpanId, ServiceName, StatusCode, Duration, '.self::DB_SYSTEM.' AS db_system,'.
 					' '.self::PEER_HOST.' AS host'.
 				' FROM otel_traces'.
-				' WHERE '.self::PERIOD.' AND SpanKind IN (\'Client\',\'Producer\')'.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND SpanKind IN (\'Client\',\'Producer\')'.self::serviceCondition($service).
 			') AS p'.
 			' LEFT JOIN ('.
 				'SELECT TraceId, ParentSpanId, ServiceName'.
 				' FROM otel_traces'.
-				' WHERE '.self::PERIOD.' AND SpanKind IN (\'Server\',\'Consumer\') AND ParentSpanId!=\'\''.
+				' WHERE '.$this->period().' AND SpanKind IN (\'Server\',\'Consumer\') AND ParentSpanId!=\'\''.
 			') AS c ON c.TraceId=p.TraceId AND c.ParentSpanId=p.SpanId'.
 			' GROUP BY source, target, db_system, host'.
 			' ORDER BY calls DESC'.
@@ -389,7 +439,7 @@ class ApmStats {
 			' FROM ('.
 				'SELECT TraceId, ServiceName, SpanName, Duration'.
 				' FROM otel_traces'.
-				' WHERE '.self::PERIOD.' AND ParentSpanId=\'\''.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
 			') AS r'.
 			' LEFT JOIN ('.
 				'SELECT TraceId, ServiceName, sumIf(Duration,db_system!=\'\') AS db,'.
@@ -397,7 +447,7 @@ class ApmStats {
 				' FROM ('.
 					'SELECT TraceId, ServiceName, Duration, '.self::DB_SYSTEM.' AS db_system'.
 					' FROM otel_traces'.
-					' WHERE '.self::PERIOD.' AND SpanKind IN (\'Client\',\'Producer\')'.self::serviceCondition($service).
+					' WHERE '.$this->period().' AND SpanKind IN (\'Client\',\'Producer\')'.self::serviceCondition($service).
 				')'.
 				' GROUP BY TraceId, ServiceName'.
 			') AS k ON k.TraceId=r.TraceId AND k.ServiceName=r.ServiceName'.
@@ -449,7 +499,7 @@ class ApmStats {
 				' toUnixTimestamp(Timestamp) AS clock, toUnixTimestamp64Nano(Timestamp) AS start,'.
 				' Duration AS duration, StatusCode=\'Error\' AS error'.
 			' FROM otel_traces'.
-			' WHERE '.self::PERIOD.' AND ParentSpanId=\'\''.self::serviceCondition($service).
+			' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
 			' ORDER BY Duration DESC'.
 			' LIMIT '.$limit.
 			self::LOW_MEMORY;
@@ -530,7 +580,7 @@ class ApmStats {
 				' count() AS calls, sum(Duration) AS total, quantile(0.95)(Duration) AS p95,'.
 				' countIf(StatusCode=\'Error\') AS errors'.
 			' FROM otel_traces'.
-			' WHERE '.self::PERIOD.' AND SpanKind=\'Client\' AND db_system!=\'\''.self::serviceCondition($service).
+			' WHERE '.$this->period().' AND SpanKind=\'Client\' AND db_system!=\'\''.self::serviceCondition($service).
 			' GROUP BY service, db_system, statement'.
 			' ORDER BY total DESC'.
 			' LIMIT '.$limit.
@@ -568,7 +618,7 @@ class ApmStats {
 				' quantileIf(0.95)(Duration,'.$current.') AS p95,'.
 				' quantileIf(0.95)(Duration,NOT '.$current.') AS previous_p95'.
 			' FROM otel_traces'.
-			' WHERE '.self::PERIOD.' AND SpanKind=\'Server\''.self::serviceCondition($service).
+			' WHERE '.$this->period().' AND SpanKind=\'Server\''.self::serviceCondition($service).
 			' GROUP BY service, endpoint'.
 			' HAVING requests>='.$min_requests.' AND previous_requests>='.$min_requests.' AND previous_p95>0'.
 			' ORDER BY p95/previous_p95 DESC'.
@@ -609,13 +659,13 @@ class ApmStats {
 		$queries = [
 			'services' => 'SELECT ServiceName AS service, \'\' AS endpoint, '.$counts.
 				' FROM otel_traces'.
-				' WHERE '.self::PERIOD.' AND ParentSpanId=\'\''.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
 				' GROUP BY service'.
 				' ORDER BY requests DESC'.
 				' LIMIT 50',
 			'endpoints' => 'SELECT ServiceName AS service, SpanName AS endpoint, '.$counts.
 				' FROM otel_traces'.
-				' WHERE '.self::PERIOD.' AND SpanKind=\'Server\''.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND SpanKind=\'Server\''.self::serviceCondition($service).
 				' GROUP BY service, endpoint'.
 				' HAVING requests>=5'.
 				' ORDER BY (satisfied+tolerating/2)/requests, requests DESC'.
@@ -658,7 +708,7 @@ class ApmStats {
 					' AS bucket,'.
 				' count() AS requests'.
 			' FROM otel_traces'.
-			' WHERE '.self::PERIOD.' AND ParentSpanId=\'\''.self::serviceCondition($service).
+			' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
 			' GROUP BY service, bucket';
 
 		$histograms = [];
@@ -690,7 +740,7 @@ class ApmStats {
 					' any(LogAttributes[\'rum.device\']) AS device, max('.$value.') AS value,'.
 					' argMax(LogAttributes[\'rum.rating\'],'.$value.') AS rating, min(Timestamp) AS ts'.
 				' FROM otel_logs'.
-				' WHERE '.self::PERIOD.' AND LogAttributes[\'rum.metric\']!=\'\''.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND LogAttributes[\'rum.metric\']!=\'\''.self::serviceCondition($service).
 				' GROUP BY metric, if(LogAttributes[\'rum.id\']!=\'\',LogAttributes[\'rum.id\'],'.
 					'toString(cityHash64(Timestamp,LogAttributes[\'rum.value\'])))'.
 			')';
@@ -770,7 +820,28 @@ class ApmStats {
 			$params['service'] = ['String', self::toLikePattern($service)];
 		}
 
-		return $this->db->fetch($sql, $params);
+		return $this->db->fetch($sql, $params + $this->applicationParams());
+	}
+
+	/**
+	 * Period condition of the hand-written queries, limited to the application when one is set.
+	 */
+	private function period(): string {
+		return self::PERIOD.$this->applicationCondition();
+	}
+
+	private function applicationCondition(): string {
+		return $this->application !== null ? ' AND '.self::APPLICATION_CONDITION : '';
+	}
+
+	private function applicationParams(): array {
+		return $this->application !== null ? ['app' => ['String', $this->application]] : [];
+	}
+
+	private function whereApplication(CClickHouseQuery $query): void {
+		if ($this->application !== null) {
+			$query->where(self::APPLICATION_CONDITION, $this->applicationParams());
+		}
 	}
 
 	private static function serviceCondition(string $service): string {

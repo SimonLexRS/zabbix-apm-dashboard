@@ -21,14 +21,16 @@ class ServiceStats {
 	/**
 	 * Statistics are calculated from root spans, the same way as the native trace list defines a trace.
 	 *
-	 * @param string $service  Service name pattern, "*" is a wildcard. Empty string matches all services.
+	 * @param string $service      Service name pattern, "*" is a wildcard. Empty string matches all services.
+	 * @param string $application  service.namespace of the services. Empty string matches all applications.
 	 *
 	 * @throws \DBException  If APM data source is not configured or not reachable.
 	 *
 	 * @return array  List of ['service', 'requests', 'errors', 'error_rate', 'rpm', 'p50', 'p95', 'p99'],
 	 *                durations in nanoseconds.
 	 */
-	public static function get(int $time_from, int $time_till, string $service, int $sort, int $limit): array {
+	public static function get(int $time_from, int $time_till, string $service, int $sort, int $limit,
+			string $application = ''): array {
 		$db = ApmDbClickHouse::getInstance(ApmDb::getInstance()->getConfig());
 
 		$query = (new CClickHouseQuery())
@@ -41,6 +43,10 @@ class ServiceStats {
 			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]])
 			->where('ParentSpanId=\'\'')
 			->group('ServiceName');
+
+		if ($application !== '') {
+			$query->where('ResourceAttributes[\'service.namespace\']={app:String}', ['app' => ['String', $application]]);
+		}
 
 		if ($service !== '') {
 			$pattern = addcslashes($service, '\\%_');
@@ -84,14 +90,15 @@ class ServiceStats {
 	 * Requests per minute of the given services (root spans), for the last $minutes complete minutes of the period.
 	 * Minutes without data are filled with zeros.
 	 *
-	 * @param array $services  Exact service names.
+	 * @param array  $services     Exact service names.
+	 * @param string $application  service.namespace of the services. Empty string matches all applications.
 	 *
 	 * @throws \DBException  If APM data source is not configured or not reachable.
 	 *
 	 * @return array  [service => int[]], one value per minute, oldest first.
 	 */
 	public static function getRequestSeries(int $time_from, int $time_till, array $services,
-			int $minutes = self::SERIES_MINUTES): array {
+			string $application = '', int $minutes = self::SERIES_MINUTES): array {
 		$series_till = intdiv($time_till, SEC_PER_MIN) * SEC_PER_MIN;
 		$series_from = max($time_from, $series_till - $minutes * SEC_PER_MIN);
 		$first_bucket = intdiv($series_from, SEC_PER_MIN) * SEC_PER_MIN;
@@ -113,6 +120,10 @@ class ServiceStats {
 			->where('has({services:Array(String)},ServiceName)', ['services' => ['String', array_values($services)]])
 			->group('ServiceName')
 			->group('bucket');
+
+		if ($application !== '') {
+			$query->where('ResourceAttributes[\'service.namespace\']={app:String}', ['app' => ['String', $application]]);
+		}
 
 		$empty = array_fill_keys(range($first_bucket, $series_till - SEC_PER_MIN, SEC_PER_MIN), 0);
 		$series = [];

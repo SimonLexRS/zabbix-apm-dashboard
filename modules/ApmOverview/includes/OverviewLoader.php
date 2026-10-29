@@ -17,7 +17,8 @@ class OverviewLoader {
 	public const ERROR_LIMIT = 50;
 
 	/**
-	 * @param array  $filter  ['service' => string, 'sort' => string, 'endpoint_service' => string, 'apdex_ms' => int]
+	 * @param array  $filter  ['application' => ?string, 'service' => string, 'sort' => string,
+	 *                        'endpoint_service' => string, 'apdex_ms' => int]
 	 * @param string $tab     One of OverviewHtml::DATA_TABS.
 	 */
 	public static function load(array $filter, int $time_from, int $time_till, string $tab): array {
@@ -34,7 +35,7 @@ class OverviewLoader {
 		$service = $filter['service'];
 
 		try {
-			$stats = new ApmStats();
+			$stats = (new ApmStats())->setApplication($filter['application']);
 
 			switch ($tab) {
 				case OverviewHtml::TAB_STATUS:

@@ -21,6 +21,40 @@
 	color: #768d99;
 }
 
+.apm-app-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	margin: 0 0 10px;
+	padding: 0;
+	list-style: none;
+	border-bottom: 1px solid rgba(118, 141, 153, 0.4);
+}
+
+.apm-app-tabs li {
+	margin-bottom: -1px;
+}
+
+.apm-app-tabs a,
+.apm-app-tabs span {
+	display: block;
+	padding: 7px 16px;
+	border: 1px solid transparent;
+	border-radius: 2px 2px 0 0;
+	font-weight: bold;
+	text-decoration: none;
+}
+
+.apm-app-tabs a:hover {
+	background-color: rgba(118, 141, 153, 0.12);
+}
+
+.apm-app-tabs .apm-app-tab-active span {
+	border-color: rgba(118, 141, 153, 0.4);
+	border-bottom-color: transparent;
+	border-top: 2px solid #0275b8;
+	background-color: rgba(2, 117, 184, 0.08);
+}
+
 .apm-overview-service-filter {
 	display: flex;
 	align-items: center;

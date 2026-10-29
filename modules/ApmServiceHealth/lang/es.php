@@ -3,9 +3,11 @@
 // Spanish texts of the APM service health widget, by their English text.
 
 return [
+	'all applications, e.g. flowspock (service.namespace)' => 'todas las aplicaciones, p. ej. flowspock (service.namespace)',
 	'all services, e.g. checkout or demo-*' => 'todos los servicios, p. ej. checkout o demo-*',
 	'APM data source is not available' => 'La fuente de datos APM no está disponible',
 	'APM service health' => 'Salud de servicios APM',
+	'Application' => 'Aplicación',
 	'Columns' => 'Columnas',
 	'Error rate' => 'Tasa de error',
 	'Error rate high (%)' => 'Tasa de error de problema (%)',
