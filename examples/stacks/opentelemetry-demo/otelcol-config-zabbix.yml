@@ -1,0 +1,36 @@
+# Extra configuration for the OpenTelemetry Demo collector: also send the application telemetry to Zabbix APM.
+# Loaded by compose.zabbix.yaml as one more --config file; the demo's own pipelines (Jaeger, Prometheus, OpenSearch)
+# keep working unchanged.
+#
+# Own pipelines with receivers [otlp] only: the collector replaces (does not merge) the exporter lists of the
+# upstream pipelines, and infrastructure metrics (docker_stats, host_metrics, ...) stay local.
+
+processors:
+  # Some demo services (frontend-web, image-provider, telemetry-docs) do not set service.namespace: the APM views
+  # and the Zabbix host of the application are keyed by it. "insert" only adds it where missing.
+  resource/zabbix:
+    attributes:
+      - key: service.namespace
+        value: ${env:ZABBIX_APM_NAMESPACE}
+        action: insert
+
+exporters:
+  otlp_grpc/zabbix:
+    endpoint: ${env:ZABBIX_APM_ENDPOINT}
+    tls:
+      insecure: ${env:ZABBIX_APM_INSECURE}
+
+service:
+  pipelines:
+    traces/zabbix:
+      receivers: [otlp]
+      processors: [resource_detection, memory_limiter, resource/zabbix, transform/sanitize_spans, gen_ai_normalizer, transform/redact_sensitive_data, redaction]
+      exporters: [otlp_grpc/zabbix]
+    metrics/zabbix:
+      receivers: [otlp]
+      processors: [resource_detection, memory_limiter, resource/zabbix]
+      exporters: [otlp_grpc/zabbix]
+    logs/zabbix:
+      receivers: [otlp]
+      processors: [resource_detection, memory_limiter, resource/zabbix, transform/sanitize_logs]
+      exporters: [otlp_grpc/zabbix]

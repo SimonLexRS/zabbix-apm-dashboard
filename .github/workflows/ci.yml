@@ -52,3 +52,22 @@ jobs:
           test -f /tmp/zbx/ui/modules/ApmServiceMap/manifest.json
           sudo env ZABBIX_UI=/tmp/zbx/ui sh scripts/install.sh --uninstall
           test ! -e /tmp/zbx/ui/modules/ApmOverview
+
+  go-example:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/stacks/go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: examples/stacks/go/go.mod
+          cache-dependency-path: examples/stacks/go/go.sum
+
+      - name: Format, vet and build
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go build ./...

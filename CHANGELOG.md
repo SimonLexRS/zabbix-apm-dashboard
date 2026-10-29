@@ -8,8 +8,14 @@
   8.0.0rc3: results read as rows, and duration items no longer group by `Duration` (they reported the shortest span).
 - `scripts/zabbix-apm-app.py add <namespace>`: idempotent onboarding of an application through the Zabbix API (template
   import, host group, host `apm-<namespace>` with its macro); `list` shows the monitored applications.
-- Guide to connect any application end to end: [docs/add-application.md](docs/add-application.md) (and Spanish).
-  `service.namespace` is now a documented requirement.
+- `scripts/verify-app.py <namespace>`: end-to-end check of an application (host, template, macro, supported items,
+  fresh values) and, with ClickHouse access, comparison of the item values with ClickHouse for that namespace.
+- Step-by-step guides in English and Spanish: [installation](docs/installation.md) (with a check per step and a
+  `telemetrygen` smoke test), [add-application](docs/add-application.md), [apm-template](docs/apm-template.md) and
+  [verification](docs/verification.md) (tested environment and results). `service.namespace` is now a documented
+  requirement.
+- Instrumentation per stack in `examples/stacks/`: a runnable Go service (built in CI), Java/Python/Node.js/.NET and
+  Kubernetes without code changes, and the OpenTelemetry Demo with its own collector exporting to Zabbix.
 
 ## 1.4.0
 

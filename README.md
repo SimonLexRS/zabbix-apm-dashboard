@@ -2,81 +2,106 @@
 
 [Español](README.es.md)
 
-Frontend modules and a template that turn the native **APM** of Zabbix 8.0 (OpenTelemetry traces, logs and metrics in
-ClickHouse) into a full application performance view: a live service map, RED metrics per service and endpoint, grouped
-errors, real user experience (Web Vitals and Apdex) and where the time of slow requests goes.
+Application performance monitoring on **Zabbix 8.0** for any application instrumented with **OpenTelemetry**: frontend
+modules (service map, RED metrics per service and endpoint, grouped errors, user experience, origin of slowness, one tab
+per application), a template derived from Zabbix's official OpenTelemetry template (one host per application, with
+triggers), onboarding and verification scripts, and step-by-step guides for Go, Java, Python, Node.js, .NET, Kubernetes
+and Docker Compose applications.
 
-![Service map](docs/screenshots/service-map.png)
+![APM Overview: service map](docs/screenshots/service-map.png)
 
-| Component | Type | What it gives you |
-|---|---|---|
-| `modules/ApmOverview` | Page (APM → Overview) | Tabs: Status, Service map, Services, Endpoints, Errors, User experience, Origin of slowness, How it works. Real-time refresh. |
-| `modules/ApmServiceMap` | Dashboard widget | The service map on any dashboard (needs ApmOverview). |
-| `modules/ApmServiceHealth` | Dashboard widget | Table of services with requests, error rate, p50/p95/p99 and trend, with color thresholds. |
-| `templates/apm_services_clickhouse_http.yaml` | Template | Items, discovery and triggers per service, endpoint and connection (error rate, p95, Apdex, health). |
-
-English and Spanish: the language follows the Zabbix user (Spanish for `es_*`, English otherwise).
-
-## Screenshots
-
-| User experience | Origin of slowness (dark theme) |
+| Component | What it gives you |
 |---|---|
-| ![User experience](docs/screenshots/user-experience.png) | ![Origin of slowness](docs/screenshots/origin-of-slowness-dark.png) |
+| `modules/ApmOverview` | Page **APM → Overview**: one tab per application (`service.namespace`); Status, Service map, Services, Endpoints, Errors, User experience, Origin of slowness. Real-time refresh. |
+| `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Dashboard widgets: service map and service health table, with an *Application* field. |
+| `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: the official *Generic OpenTelemetry by OTLP* limited to one application; spans by status, durations, error %, logs by severity, triggers and a dashboard. [Details](docs/apm-template.md). |
+| `templates/apm_services_clickhouse_http.yaml` | Optional: items and triggers per service, endpoint and connection (error rate, p95, Apdex). |
+| `scripts/zabbix-apm-app.py` | Onboards an application through the Zabbix API: template, host `apm-<namespace>`, macro. Idempotent. |
+| `scripts/verify-app.py` | Checks an application end to end and compares the Zabbix values with ClickHouse. |
+| `examples/stacks/` | Instrumentation per stack: [Go](examples/stacks/go/README.md) (runnable), [Java/Python/Node.js/.NET/Kubernetes](examples/stacks/zero-code/README.md), [OpenTelemetry Demo / own collector](examples/stacks/opentelemetry-demo/README.md). |
 
-More in [docs/screenshots](docs/screenshots).
+English and Spanish: the modules follow the language of the Zabbix user.
 
-## Requirements
+## How it works
 
-- **Zabbix 8.0.0rc3** or later (rc3 changed the ClickHouse query parameters), with its APM data source configured (Administration → Data source → APM): the modules reuse
-  that ClickHouse connection and the native trace viewer.
-- **ClickHouse** with the tables of the OpenTelemetry Collector `clickhouse` exporter (`otel_traces`, `otel_logs`,
-  `otel_metrics_*`), written by an OpenTelemetry Collector or the APM collector of a Zabbix proxy.
-- PHP 8.2+ (the Zabbix 8.0 frontend requirement). No other dependencies.
+```
+your applications ──OTLP──▶ OpenTelemetry Collector ──▶ ClickHouse (zabbix.otel_*)
+  service.name                                               │
+  service.namespace = the application ◀── everything is keyed by it
+                                                             ├──▶ APM → Overview (tab per application) + widgets
+                                                             └──▶ host apm-<application>: template items, triggers, dashboard
+```
+
+An application is identified by the standard resource attribute **`service.namespace`**. Nothing in Zabbix or in these
+modules is specific to one application: a new one needs the `OTEL_*` variables and one command.
 
 ## Quick start
 
-```sh
-git clone https://github.com/SimonLexRS/zabbix-apm-dashboard.git
-cd zabbix-apm-dashboard
-sudo ./scripts/install.sh
-```
+1. **Install once per Zabbix** — ClickHouse, collector, data source, modules, template: [docs/installation.md](docs/installation.md).
+2. **Instrument the application** with the standard variables (code examples per stack in [examples/stacks](examples/stacks)):
 
-Then in Zabbix: **Administration → General → Modules → Scan directory**, enable **APM Overview**, **APM service map** and
-**APM service health**, and open **APM → Overview**.
+   ```sh
+   OTEL_SERVICE_NAME=checkout-api
+   OTEL_RESOURCE_ATTRIBUTES=service.namespace=shop
+   OTEL_EXPORTER_OTLP_ENDPOINT=http://<collector>:4317
+   ```
 
-Full guide, including the collector, ClickHouse users and the template: [docs/installation.md](docs/installation.md).
-Connecting an application (instrumentation, collector, Zabbix host with the OpenTelemetry template):
-[docs/add-application.md](docs/add-application.md).
+3. **Create its host:** `python3 scripts/zabbix-apm-app.py add shop`
+4. **Verify:** `python3 scripts/verify-app.py shop` → `all checks passed`
+5. **Look:** **APM → Overview → shop**, and **Monitoring → Hosts → apm-shop**.
+
+Per application, in detail: [docs/add-application.md](docs/add-application.md).
+
+## Verified
+
+Tested on Zabbix 8.0.0rc3, ClickHouse 26.9 and otelcol-contrib 0.162 with four applications: the OpenTelemetry Demo
+(~20 services, 10 languages), a Go production API, the Go example and a `telemetrygen` smoke test. Template values
+match ClickHouse per application. Method, results and how to repeat it: [docs/verification.md](docs/verification.md).
+
+## Screenshots
+
+| Services of an application | The OpenTelemetry Demo store (one of the verified applications) |
+|---|---|
+| ![Services](docs/screenshots/services.png) | ![Store](docs/screenshots/otel-demo-store.png) |
+
+More: [user experience](docs/screenshots/user-experience.png), [origin of slowness](docs/screenshots/origin-of-slowness-dark.png).
+
+## Documentation
+
+| Guide | |
+|---|---|
+| [installation.md](docs/installation.md) | Once per Zabbix, step by step with a check per step and a smoke test |
+| [add-application.md](docs/add-application.md) | Each application: instrument, reach the collector, Zabbix host, verify |
+| [apm-template.md](docs/apm-template.md) | The APM template: items, triggers, macros, tuning, upgrades |
+| [verification.md](docs/verification.md) | What was tested and how to repeat it |
+| [rum.md](docs/rum.md) | Web Vitals from real browsers |
+| [troubleshooting.md](docs/troubleshooting.md) | Common problems |
 
 ## What each tab answers
 
-The page shows one application at a time: pick it in the tabs at the top (one per `service.namespace`).
-
 - **Status**: is telemetry arriving? Data source, connection and rows per signal.
-- **Service map**: what the application is made of: users → services → databases and external services, with
-  calls/min, error rate and p95 on every arrow, health colors, and click-through to each service.
-- **Services / Endpoints**: RED metrics (rate, errors, duration) with per-minute trends; routeless requests shown as
-  "(no route · 404)".
+- **Service map**: users → services → databases and external services, with calls/min, error rate and p95 on every
+  arrow, health colors, and click-through to each service.
+- **Services / Endpoints**: RED metrics (rate, errors, duration) with per-minute trends.
 - **Errors**: failures grouped by service, endpoint and message, with counts, first/last seen and the latest trace.
-- **User experience**: Core Web Vitals from real browsers (LCP, INP, CLS, FCP, TTFB per page and device, see
-  [docs/rum.md](docs/rum.md)), Apdex per service and endpoint, latency histograms.
-- **Origin of slowness**: time breakdown per endpoint (own code / database / other services), the slowest requests
-  with their span waterfall, the most expensive database statements and endpoints slower than in the previous period.
+- **User experience**: Core Web Vitals (see [docs/rum.md](docs/rum.md)), Apdex per service and endpoint, latency
+  histograms.
+- **Origin of slowness**: time per endpoint (own code / database / other services), the slowest requests with their
+  span waterfall, the most expensive statements and endpoints slower than in the previous period.
 
-The page filter takes a service name: a substring (`checkout`), a wildcard (`demo-*`) or an exact name (`=api`, what the
-links and the suggestions use). Only the visible tab is queried, every 10 s / 30 s or on demand.
+The service filter takes a substring (`checkout`), a wildcard (`demo-*`) or an exact name (`=api`). Only the visible tab
+is queried, every 10 s / 30 s or on demand.
 
 ## Development
 
 ```sh
-php tests/run.php        # service patterns, map graph, translations (no Zabbix needed)
+php tests/run.php                                   # module tests (no Zabbix needed)
+python3 scripts/build-otlp-app-template.py --check  # generated template up to date
 ```
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) lints PHP 8.2–8.4 and JavaScript, runs the tests, validates the
-manifests and the template, and installs/uninstalls into a mock frontend.
-
-Translations live in `modules/*/lang/es.php`, keyed by the English text; the tests fail if a translated text has no
-Spanish entry. To add a language, add `lang/<code>.php` (the Zabbix language code before `_`, e.g. `pt`).
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) lints PHP 8.2–8.4 and JavaScript, runs the tests, validates
+manifests and templates, checks the generated template, builds the Go example and installs/uninstalls into a mock
+frontend. Translations live in `modules/*/lang/es.php`, keyed by the English text.
 
 ## License
 

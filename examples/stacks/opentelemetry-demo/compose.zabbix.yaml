@@ -1,0 +1,27 @@
+# Add-on for the OpenTelemetry Demo (https://github.com/open-telemetry/opentelemetry-demo): export the application
+# telemetry to Zabbix APM as well. Copy this file and otelcol-config-zabbix.yml to the root of the demo, set the
+# variables in .env.override and start the demo with this file as the last -f:
+#
+#   ZABBIX_APM_ENDPOINT=zabbix-apm.example.com:4317   # OTLP/gRPC collector of the Zabbix APM data source
+#   ZABBIX_APM_NAMESPACE=opentelemetry-demo           # application name (tab and Zabbix host apm-<namespace>)
+#   ZABBIX_APM_INSECURE=true                          # plain-text gRPC: only inside a VPN/private network
+#
+#   docker compose -f compose.yaml -f compose.full.yaml -f compose.observability.yaml -f compose.zabbix.yaml \
+#     --env-file .env --env-file .env.override up -d
+
+services:
+  otel-collector:
+    # Same list as compose.observability.yaml, plus the Zabbix file before the extras file (always the last one).
+    command:
+      - "--config=/etc/otelcol-config.yml"
+      - "--config=/etc/otelcol-config-full.yml"
+      - "--config=/etc/otelcol-config-observability.yml"
+      - "--config=/etc/otelcol-config-zabbix.yml"
+      - "--config=/etc/otelcol-config-extras.yml"
+      - "--feature-gates=service.profilesSupport"
+    volumes:
+      - ./otelcol-config-zabbix.yml:/etc/otelcol-config-zabbix.yml
+    environment:
+      - ZABBIX_APM_ENDPOINT=${ZABBIX_APM_ENDPOINT:?set ZABBIX_APM_ENDPOINT in .env.override}
+      - ZABBIX_APM_NAMESPACE=${ZABBIX_APM_NAMESPACE:-opentelemetry-demo}
+      - ZABBIX_APM_INSECURE=${ZABBIX_APM_INSECURE:-false}

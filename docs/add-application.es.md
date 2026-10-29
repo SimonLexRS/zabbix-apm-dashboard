@@ -16,8 +16,8 @@ aplicación (SDK OTel) ──OTLP──▶ collector ──▶ ClickHouse zabbix
 | Servicio | `service.name`: un proceso desplegable | `flowspock-api` |
 | Entorno (opcional) | `deployment.environment.name` | `production` |
 
-Requisitos (una vez por Zabbix): pasos 1–5 de [installation.md](installation.md) (ClickHouse, collector, fuente de
-datos, módulos).
+Requisitos (una vez por Zabbix): [installation.es.md](installation.es.md) (ClickHouse, collector, fuente de datos,
+módulos, template).
 
 ## 1. Instrumentar la aplicación
 
@@ -30,6 +30,10 @@ OTEL_RESOURCE_ATTRIBUTES=service.namespace=flowspock,deployment.environment.name
 OTEL_EXPORTER_OTLP_ENDPOINT=http://<collector>:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc        # o http/protobuf con el puerto 4318
 ```
+
+Por stack, con el código o los comandos: [Go](../examples/stacks/go/README.es.md) (SDK, ejemplo ejecutable),
+[Java, Python, Node.js, .NET, Kubernetes](../examples/stacks/zero-code/README.es.md) (sin cambios de código),
+[una aplicación con su propio collector](../examples/stacks/opentelemetry-demo/README.es.md) (OpenTelemetry Demo).
 
 Reglas del namespace: en minúsculas, estable y sin espacios (será el nombre de la pestaña y del host). Los spans sin
 namespace aparecen en la pestaña "Sin aplicación".
@@ -65,9 +69,7 @@ El collector de [examples/otelcol-config.yaml](../examples/otelcol-config.yaml) 
       # igual para metrics/zabbix y logs/zabbix
   ```
 
-  Un ejemplo completo es la integración del OpenTelemetry Demo: `compose.local.yaml` y
-  `src/otel-collector/otelcol-config-zabbix.yml` en
-  [SimonLexRS/opentelemetry-demo](https://github.com/SimonLexRS/opentelemetry-demo).
+  Ejemplo completo y probado: [examples/stacks/opentelemetry-demo](../examples/stacks/opentelemetry-demo/README.es.md).
 
 Comprobación: en menos de un minuto, **APM → Overview** muestra una pestaña con el namespace.
 
@@ -101,6 +103,14 @@ porcentaje de error, entradas de log por severidad y número de métricas recibi
 Ajusta los macros en el host de cada aplicación. Para alertas por servicio y por endpoint añade
 **APM services by ClickHouse HTTP v2** ([installation.md](installation.md#6-template-alerts-and-history)) con
 `{$APM.SERVICE.MATCHES}` limitado a los servicios de la aplicación.
+
+Compruébalo de punta a punta (a los 3-4 minutos; ver [verification.es.md](verification.es.md)):
+
+```sh
+python3 scripts/verify-app.py flowspock          # añade CH_URL/CH_USER/CH_PASSWORD para comparar con ClickHouse
+```
+
+Detalles del template y cómo ajustarlo: [apm-template.es.md](apm-template.es.md).
 
 ## 4. Verla
 
