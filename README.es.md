@@ -38,6 +38,8 @@ Luego en Zabbix: **Administration → General → Modules → Scan directory**, 
 **APM service health**, y abre **APM → Overview**.
 
 Guía completa, con el colector, los usuarios de ClickHouse y el template: [docs/installation.md](docs/installation.md)
+Conectar una aplicación (instrumentación, collector, host de Zabbix con el template de OpenTelemetry):
+[docs/add-application.es.md](docs/add-application.es.md).
 (en inglés).
 
 ## Qué responde cada pestaña

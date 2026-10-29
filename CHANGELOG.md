@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0
+
+- New template **OpenTelemetry application by OTLP** (`templates/otel_application_otlp.json`): Zabbix's official
+  "Generic OpenTelemetry by OTLP" limited to one application with `{$OTLP.NAMESPACE}`, generated from the exported
+  official template by `scripts/build-otlp-app-template.py` (checked in CI). It also fixes the official template on
+  8.0.0rc3: results read as rows, and duration items no longer group by `Duration` (they reported the shortest span).
+- `scripts/zabbix-apm-app.py add <namespace>`: idempotent onboarding of an application through the Zabbix API (template
+  import, host group, host `apm-<namespace>` with its macro); `list` shows the monitored applications.
+- Guide to connect any application end to end: [docs/add-application.md](docs/add-application.md) (and Spanish).
+  `service.namespace` is now a documented requirement.
+
 ## 1.4.0
 
 - APM Overview: one tab per application (`service.namespace`) above the filter, so applications are never mixed. The

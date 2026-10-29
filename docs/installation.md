@@ -29,13 +29,17 @@ A Zabbix proxy built with APM (`StartAPMCollectors=1`, `TelemetryProvider=clickh
 
 ## 3. Instrument the applications
 
-Any OpenTelemetry SDK or auto-instrumentation works; point it to the collector:
+Any OpenTelemetry SDK or auto-instrumentation works; point it to the collector and set the application
+(`service.namespace`, required: the APM Overview tabs and the application hosts are keyed by it):
 
 ```sh
 OTEL_SERVICE_NAME=checkout
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=shop
 OTEL_EXPORTER_OTLP_ENDPOINT=http://<collector>:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 ```
+
+Step by step for each new application, including the Zabbix host: [add-application.md](add-application.md).
 
 What the views use:
 - server spans (`SpanKind = Server`) with a route in the span name (e.g. `GET /orders/{id}`) for endpoints;
@@ -67,6 +71,10 @@ unless the release notes say so. Removal: `sudo ./scripts/install.sh --uninstall
 
 ## 6. Template (alerts and history)
 
+Per application: **OpenTelemetry application by OTLP** (Zabbix's official OpenTelemetry template, one host per
+`service.namespace`), created with `scripts/zabbix-apm-app.py`; see [add-application.md](add-application.md).
+
+Per service and endpoint, optionally:
 **Data collection → Templates → Import** `templates/apm_services_clickhouse_http.yaml`, link
 **APM services by ClickHouse HTTP v2** to a host and set its macros:
 
