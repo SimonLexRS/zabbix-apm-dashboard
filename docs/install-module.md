@@ -87,6 +87,23 @@ Super admins can always.
 
 ![User role](screenshots/install-user-role.png)
 
+### Who sees what
+
+The modules apply the same Zabbix permissions as the native APM pages, so there is nothing to configure in them:
+
+| Zabbix setting | Effect in APM Overview and the widgets |
+|---|---|
+| Role, *Access to UI elements* → **APM → Traces** | The page, the menu entry and the widgets. Without it, nothing |
+| Role → **APM → Logs** / **APM → Metrics** | Logs and metrics figures (Status, How it works, Web Vitals) and links to the Logs and Metrics pages. Without them, those parts are hidden and not queried |
+| User group → **APM filter** (resource attributes) | Only the telemetry that matches: application tabs, every tab, the widgets (also with an empty *Application*) and the spans of slow traces. Several filters add up (any of them), across all the user's groups; *Category* limits a filter to traces, metrics or logs. No filter = everything |
+| User group → **Host permissions** on `apm-<namespace>` | The application host, its items and triggers (How it works shows the host only to who can read it) |
+| User type **Super admin** | Everything; APM filters do not apply, as in Zabbix |
+
+To restrict a team to its application: **Users → User groups → <group> → APM filter** → Key `service.namespace`, Value
+`<namespace>`, Category *All*. The same filter limits the native **APM → Traces / Logs / Metrics** pages.
+
+![APM filter of a user group](screenshots/install-apm-filter.png)
+
 ## 5. Widgets on a dashboard
 
 Edit a dashboard → **Add widget** → type **APM service map** or **APM service health**. Both have an *Application* field
@@ -109,6 +126,7 @@ Edit a dashboard → **Add widget** → type **APM service map** or **APM servic
 | "The APM data source is not configured" | Step 3 |
 | "Cannot query the APM data source" | URL or user from the point of view of the Zabbix **server/frontend** (in Docker, the service name, not `localhost`) |
 | No *APM → Overview* menu, or "Access denied" | Role without **APM → Traces** or without the modules in *Access to modules* (step 4) |
+| A user sees fewer applications than an administrator | APM filter of their user groups ([Who sees what](#who-sees-what)) |
 | A widget says it needs APM Overview | Enable the **APM Overview** module too |
 
 More: [troubleshooting.md](troubleshooting.md). Next: connect an application — [add-application.md](add-application.md).

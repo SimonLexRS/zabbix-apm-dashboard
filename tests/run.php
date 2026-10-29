@@ -13,6 +13,7 @@ namespace {
 	$root = dirname(__DIR__).'/modules';
 
 	require $root.'/ApmOverview/includes/I18n.php';
+	require $root.'/ApmOverview/includes/ApmAccess.php';
 	require $root.'/ApmOverview/includes/ApmStats.php';
 	require $root.'/ApmOverview/includes/ServiceMap.php';
 	require $root.'/ApmOverview/includes/Integration.php';
@@ -42,6 +43,29 @@ namespace Modules\ApmOverview\Includes {
 	check('app gone falls back to first', ApmStats::resolveApplication(['apm-demo', 'flowspock'], 'old'), 'apm-demo');
 	check('app no namespace', ApmStats::resolveApplication(['', 'flowspock'], ''), '');
 	check('app none', ApmStats::resolveApplication([], 'flowspock'), null);
+
+	// APM filter of the user groups: no filters, no condition; values of one key in one IN; keys joined with OR; every
+	// value is a parameter.
+	check('access none', ApmAccess::condition([], 'a'), ['', []]);
+	[$sql, $params] = ApmAccess::condition([
+		['key' => 'service.namespace', 'value' => 'go-example'],
+		['key' => 'service.namespace', 'value' => 'shop\' OR 1=1'],
+		['key' => 'deployment.environment.name', 'value' => 'lab']
+	], 'a');
+	check('access sql', $sql, '((mapContains(ResourceAttributes,{a_k0:String})'.
+		' AND ResourceAttributes[{a_k0:String}] IN {a_v0:Array(String)})'.
+		' OR (mapContains(ResourceAttributes,{a_k1:String})'.
+		' AND ResourceAttributes[{a_k1:String}] IN {a_v1:Array(String)}))'
+	);
+	check('access params', $params, [
+		'a_k0' => ['String', 'service.namespace'],
+		'a_v0' => ['String', ['go-example', 'shop\' OR 1=1']],
+		'a_k1' => ['String', 'deployment.environment.name'],
+		'a_v1' => ['String', ['lab']]
+	]);
+	check('access duplicates', ApmAccess::condition([['key' => 'k', 'value' => 'v'], ['key' => 'k', 'value' => 'v']],
+		'a')[1]['a_v0'], ['String', ['v']]
+	);
 
 	// Integration guide: the agreed languages, four steps each, only known placeholders, host name as the scripts.
 	I18n::setLanguage('en');

@@ -44,6 +44,14 @@ retry on the next refresh; the queries that join spans use at most the last 6 ho
 
 The service map widget uses the code of the APM Overview module: enable both.
 
+## A user sees fewer applications than an administrator, or none
+
+The modules apply the **APM filter** of the user's groups (Users → User groups → APM filter), as the native APM pages
+do: only telemetry whose resource attributes match a filter is shown, and Super admins are not filtered. Check that
+the filter matches the data, e.g. Key `service.namespace` and the exact namespace. Without *APM → Logs* or *APM →
+Metrics* in the role, logs and metrics are hidden as well. See
+[install-module.md](install-module.md#who-sees-what).
+
 ## The page is in English for a Spanish user
 
 The language is the one of the Zabbix user (User settings → Profile → Language); `es_*` shows Spanish. "System default"

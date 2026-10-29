@@ -126,6 +126,18 @@ OK   Unset average duration: Zabbix 0.0881 s, ClickHouse 0.0881 s
 ---- all checks passed
 ```
 
+8. **Roles y grupos de usuarios.** En el mismo laboratorio, con `go-example` y `my-app` enviando datos, tres usuarios
+   abrieron todas las pestañas de APM Overview (`apm.overview.data`, las 8) y los dos widgets con *Application* vacío:
+
+   | Usuario | Ajuste | Pestañas de aplicación | Datos de `my-app` en algún sitio | Cifras y enlaces de logs |
+   |---|---|---|---|---|
+   | Admin | Super admin | go-example, my-app | sí | sí |
+   | go-viewer | User role; grupo con APM filter `service.namespace = go-example` (All) | solo go-example, también si la URL pide `filter_app=my-app` | no (ni en la página ni en los widgets) | sí |
+   | nolog-viewer | rol sin *APM → Logs*; sin APM filter | go-example, my-app | sí | no |
+
+   Sin avisos de PHP ni errores de ClickHouse en ninguna pestaña. `php tests/run.php` comprueba la condición que se
+   construye con los filtros (los valores van siempre como parámetros de la consulta).
+
 ## Cómo leer las comprobaciones
 
 - Un valor recogido en el instante T cuenta los spans de [T − 70 s, T − 10 s) (`{$OTLP.GRANULARITY}` 1m,

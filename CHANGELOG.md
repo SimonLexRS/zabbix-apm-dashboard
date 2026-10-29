@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.0
+
+- The modules respect Zabbix permissions the way the native APM pages do:
+  - the **APM filter** of the user's groups (Users → User groups → APM filter) now limits the application tabs, every
+    tab of APM Overview, both widgets (also with an empty *Application*) and the spans of slow traces; Super admins are
+    not filtered;
+  - logs and metrics figures and links are shown only to roles with *APM → Logs* / *APM → Metrics*.
+
+  Before, any user with *APM → Traces* saw the telemetry of every application.
+- Docs: "Who sees what" in [docs/install-module.md](docs/install-module.md#who-sees-what), with the APM filter of a user
+  group.
+
 ## 1.8.0
 
 - Lab (`examples/lab`, `scripts/lab-bootstrap.py`, [docs/lab.md](docs/lab.md)): Zabbix 8.0, ClickHouse, a collector, the

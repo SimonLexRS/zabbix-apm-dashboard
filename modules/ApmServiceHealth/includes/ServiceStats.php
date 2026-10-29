@@ -4,7 +4,9 @@ namespace Modules\ApmServiceHealth\Includes;
 
 use ApmDb,
 	ApmDbClickHouse,
-	CClickHouseQuery;
+	CClickHouseHelper,
+	CClickHouseQuery,
+	CWebUser;
 
 /**
  * RED statistics per service read from the ClickHouse telemetry data source.
@@ -47,6 +49,8 @@ class ServiceStats {
 		if ($application !== '') {
 			$query->where('ResourceAttributes[\'service.namespace\']={app:String}', ['app' => ['String', $application]]);
 		}
+
+		self::whereAccess($query);
 
 		if ($service !== '') {
 			$pattern = addcslashes($service, '\\%_');
@@ -125,6 +129,8 @@ class ServiceStats {
 			$query->where('ResourceAttributes[\'service.namespace\']={app:String}', ['app' => ['String', $application]]);
 		}
 
+		self::whereAccess($query);
+
 		$empty = array_fill_keys(range($first_bucket, $series_till - SEC_PER_MIN, SEC_PER_MIN), 0);
 		$series = [];
 
@@ -138,6 +144,31 @@ class ServiceStats {
 		}
 
 		return array_map('array_values', $series);
+	}
+
+	/**
+	 * APM filter of the user's groups (Users → User groups → APM filter), applied as the native APM pages apply it:
+	 * not to Super admins, and nothing to filter when the user's groups have none for traces.
+	 */
+	private static function whereAccess(CClickHouseQuery $query): void {
+		if (CWebUser::$data['type'] == USER_TYPE_SUPER_ADMIN) {
+			return;
+		}
+
+		$result = DBselect(
+			'SELECT DISTINCT uaf.attribute_key,uaf.value'.
+			' FROM users_groups ug'.
+			' JOIN usrgrp_apm_filter uaf ON ug.usrgrpid=uaf.usrgrpid'.
+			' WHERE ug.userid='.zbx_dbstr(CWebUser::$data['userid']).
+				' AND '.dbConditionInt('uaf.signal_type', [SIGNAL_TYPE_ALL, SIGNAL_TYPE_TRACES])
+		);
+		$filters = [];
+
+		while ($row = DBfetch($result)) {
+			$filters[] = ['key' => $row['attribute_key'], 'operator' => TAG_OPERATOR_EQUAL, 'value' => $row['value']];
+		}
+
+		CClickHouseHelper::addAttributeFilter($query, 'ResourceAttributes', $filters, TAG_EVAL_TYPE_OR);
 	}
 
 	/**

@@ -41,7 +41,7 @@ class OverviewLoader {
 			switch ($tab) {
 				case OverviewHtml::TAB_STATUS:
 					$data['version'] = $stats->getServerVersion();
-					$data['signals'] = $stats->getSignalStats($time_from, $time_till);
+					$data['signals'] = $stats->getSignalStats($time_from, $time_till, ApmAccess::signals());
 					break;
 
 				case OverviewHtml::TAB_MAP:
@@ -69,8 +69,11 @@ class OverviewLoader {
 					break;
 
 				case OverviewHtml::TAB_UX:
-					self::section($data, 'vitals', ['overall' => [], 'pages' => [], 'devices' => [], 'hourly' => []],
-						fn() => $stats->getWebVitals($time_from, $time_till, $service)
+					// Web Vitals are log records: only for roles with APM → Logs.
+					$no_vitals = ['overall' => [], 'pages' => [], 'devices' => [], 'hourly' => []];
+					self::section($data, 'vitals', $no_vitals, fn() => in_array('logs', ApmAccess::signals(), true)
+						? $stats->getWebVitals($time_from, $time_till, $service)
+						: $no_vitals
 					);
 					self::section($data, 'apdex', ['services' => [], 'endpoints' => []],
 						fn() => $stats->getApdex($time_from, $time_till, $service, $filter['apdex_ms'] * 1000000)
@@ -83,7 +86,7 @@ class OverviewLoader {
 				case OverviewHtml::TAB_HOWTO:
 					// "Is it working now": a fixed recent window, whatever the period of the page.
 					$data['application'] = $filter['application'];
-					$data['signals'] = $stats->getSignalStats(time() - OverviewHtml::CHECK_WINDOW, time());
+					$data['signals'] = $stats->getSignalStats(time() - OverviewHtml::CHECK_WINDOW, time(), ApmAccess::signals());
 					$data['services'] = $stats->getServiceNames(SEC_PER_DAY);
 					// Services sending right now without service.namespace: they cannot be told apart by application.
 					$data['unnamespaced'] = $filter['application'] !== null && $filter['application'] !== ''

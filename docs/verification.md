@@ -121,6 +121,18 @@ OK   Unset average duration: Zabbix 0.0881 s, ClickHouse 0.0881 s
 ---- all checks passed
 ```
 
+8. **Roles and user groups.** In the same lab, with `go-example` and `my-app` sending, three users opened every tab
+   of APM Overview (`apm.overview.data`, the 8 tabs) and both widgets with an empty *Application*:
+
+   | User | Setting | Application tabs | `my-app` data anywhere | Logs figures and links |
+   |---|---|---|---|---|
+   | Admin | Super admin | go-example, my-app | yes | yes |
+   | go-viewer | User role; user group with APM filter `service.namespace = go-example` (All) | go-example only, also when the URL asks for `filter_app=my-app` | no (page and both widgets) | yes |
+   | nolog-viewer | role without *APM → Logs*; no APM filter | go-example, my-app | yes | no |
+
+   No PHP warnings and no ClickHouse errors in any tab. `php tests/run.php` checks the condition built from the
+   filters (values always passed as query parameters).
+
 ## How to read the checks
 
 - A value collected at time T counts the spans of [T − 70 s, T − 10 s) (`{$OTLP.GRANULARITY}` 1m,

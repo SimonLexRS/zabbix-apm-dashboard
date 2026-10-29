@@ -4,7 +4,7 @@
 	"type": "widget",
 	"name": "APM service map",
 	"namespace": "ApmServiceMap",
-	"version": "1.8.0",
+	"version": "1.9.0",
 	"author": "Simon Alex Rodriguez",
 	"url": "https://github.com/SimonLexRS/zabbix-apm-dashboard",
 	"description": "Dashboard widget: APM service map (users, services, databases and external services with traffic, errors and latency of each connection). Requires the APM Overview module. English and Spanish.",

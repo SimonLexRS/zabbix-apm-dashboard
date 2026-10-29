@@ -45,6 +45,8 @@ class ApmStats {
 		]
 	];
 
+	private const SIGNAL_TYPES = ['traces' => ApmAccess::TRACES, 'logs' => ApmAccess::LOGS, 'metrics' => ApmAccess::METRICS];
+
 	// Database (or queue) system of a client span: new semantic conventions first, then the old ones.
 	private const DB_SYSTEM = 'multiIf(SpanAttributes[\'db.system.name\']!=\'\',SpanAttributes[\'db.system.name\'],'.
 		'SpanAttributes[\'db.system\']!=\'\',SpanAttributes[\'db.system\'],SpanAttributes[\'messaging.system\'])';
@@ -93,12 +95,13 @@ class ApmStats {
 	 * @return string[]
 	 */
 	public function getApplications(int $seconds = 7 * SEC_PER_DAY): array {
+		[$access, $params] = self::accessCondition(ApmAccess::TRACES);
 		$sql = 'SELECT DISTINCT ResourceAttributes[\'service.namespace\'] AS app FROM otel_traces'.
-			' WHERE Timestamp>=now()-{seconds:UInt32}'.
+			' WHERE Timestamp>=now()-{seconds:UInt32}'.($access !== '' ? ' AND '.$access : '').
 			' ORDER BY app=\'\', app';
 
 		return array_map(static fn(array $row): string => (string) $row['app'],
-			self::rows($this->db, $sql, ['seconds' => ['UInt32', $seconds]])
+			self::rows($this->db, $sql, ['seconds' => ['UInt32', $seconds]] + $params)
 		);
 	}
 
@@ -136,12 +139,14 @@ class ApmStats {
 	/**
 	 * Rows received and last data timestamp per signal type (traces, logs, metrics) within the period.
 	 *
+	 * @param string[] $signals  The signals to read.
+	 *
 	 * @return array  [signal => ['rows' => int, 'last' => int|null, 'error' => string|null]]
 	 */
-	public function getSignalStats(int $time_from, int $time_till): array {
+	public function getSignalStats(int $time_from, int $time_till, array $signals): array {
 		$result = [];
 
-		foreach (self::SIGNAL_TABLES as $signal => $tables) {
+		foreach (array_intersect_key(self::SIGNAL_TABLES, array_flip($signals)) as $signal => $tables) {
 			$result[$signal] = ['rows' => 0, 'last' => null, 'error' => null];
 
 			foreach ($tables as $table => $time_column) {
@@ -152,7 +157,7 @@ class ApmStats {
 					->where($time_column.'>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
 					->where($time_column.'<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]]);
 
-				$this->whereApplication($query);
+				$this->whereApplication($query, self::SIGNAL_TYPES[$signal]);
 
 				try {
 					$row = self::rows($this->db, $query->getSql(), $query->getParams())[0] ?? ['rows' => 0, 'last' => null];
@@ -522,13 +527,15 @@ class ApmStats {
 			return [];
 		}
 
-		// Child spans can end a little after the period: one more minute on each side.
+		// Child spans can end a little after the period: one more minute on each side. Spans of every application of
+		// the trace, except those the user may not see, as in the native trace view.
+		[$access, $access_params] = self::accessCondition(ApmAccess::TRACES);
 		$sql = 'SELECT TraceId AS traceid, SpanId AS id, ParentSpanId AS parent, ServiceName AS service,'.
 				' SpanName AS name, SpanKind AS kind, '.self::DB_SYSTEM.' AS db_system,'.
 				' toUnixTimestamp64Nano(Timestamp) AS start, Duration AS duration, StatusCode=\'Error\' AS error,'.
 				' count() OVER (PARTITION BY TraceId) AS span_count'.
 			' FROM otel_traces'.
-			' WHERE '.self::PERIOD.' AND TraceId IN {traceids:Array(String)}'.
+			' WHERE '.self::PERIOD.($access !== '' ? ' AND '.$access : '').' AND TraceId IN {traceids:Array(String)}'.
 			' ORDER BY TraceId, Timestamp'.
 			' LIMIT '.$span_limit.' BY TraceId'.
 			self::LOW_MEMORY;
@@ -537,7 +544,7 @@ class ApmStats {
 			'time_from' => ['Int32', $time_from - SEC_PER_MIN],
 			'time_till' => ['Int32', $time_till + SEC_PER_MIN],
 			'traceids' => ['String', array_keys($traces)]
-		];
+		] + $access_params;
 
 		foreach (self::rows($this->db, $sql, $params) as $row) {
 			$trace = &$traces[$row['traceid']];
@@ -738,7 +745,8 @@ class ApmStats {
 					' any(LogAttributes[\'rum.device\']) AS device, max('.$value.') AS value,'.
 					' argMax(LogAttributes[\'rum.rating\'],'.$value.') AS rating, min(Timestamp) AS ts'.
 				' FROM otel_logs'.
-				' WHERE '.$this->period().' AND LogAttributes[\'rum.metric\']!=\'\''.self::serviceCondition($service).
+				' WHERE '.$this->period(ApmAccess::LOGS).' AND LogAttributes[\'rum.metric\']!=\'\''.
+					self::serviceCondition($service).
 				' GROUP BY metric, if(LogAttributes[\'rum.id\']!=\'\',LogAttributes[\'rum.id\'],'.
 					'toString(cityHash64(Timestamp,LogAttributes[\'rum.value\'])))'.
 			')';
@@ -847,24 +855,47 @@ class ApmStats {
 	}
 
 	/**
-	 * Period condition of the hand-written queries, limited to the application when one is set.
+	 * Period condition of the hand-written queries, limited to what the user may see and to the application when one
+	 * is set.
 	 */
-	private function period(): string {
-		return self::PERIOD.$this->applicationCondition();
+	private function period(int $signal = ApmAccess::TRACES): string {
+		return self::PERIOD.$this->applicationCondition($signal);
 	}
 
-	private function applicationCondition(): string {
-		return $this->application !== null ? ' AND '.self::APPLICATION_CONDITION : '';
+	private function applicationCondition(int $signal = ApmAccess::TRACES): string {
+		$access = self::accessCondition($signal)[0];
+
+		return ($access !== '' ? ' AND '.$access : '')
+			.($this->application !== null ? ' AND '.self::APPLICATION_CONDITION : '');
 	}
 
+	/**
+	 * Parameters of applicationCondition() for every signal, so that one set serves any query.
+	 */
 	private function applicationParams(): array {
-		return $this->application !== null ? ['app' => ['String', $this->application]] : [];
+		$params = $this->application !== null ? ['app' => ['String', $this->application]] : [];
+
+		foreach ([ApmAccess::TRACES, ApmAccess::METRICS, ApmAccess::LOGS] as $signal) {
+			$params += self::accessCondition($signal)[1];
+		}
+
+		return $params;
 	}
 
-	private function whereApplication(CClickHouseQuery $query): void {
-		if ($this->application !== null) {
-			$query->where(self::APPLICATION_CONDITION, $this->applicationParams());
+	private function whereApplication(CClickHouseQuery $query, int $signal = ApmAccess::TRACES): void {
+		[$access, $params] = self::accessCondition($signal);
+
+		if ($access !== '') {
+			$query->where($access, $params);
 		}
+
+		if ($this->application !== null) {
+			$query->where(self::APPLICATION_CONDITION, ['app' => ['String', $this->application]]);
+		}
+	}
+
+	private static function accessCondition(int $signal): array {
+		return ApmAccess::condition(ApmAccess::filters($signal), 'access'.$signal);
 	}
 
 	private static function serviceCondition(string $service): string {

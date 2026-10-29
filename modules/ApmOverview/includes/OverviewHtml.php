@@ -113,7 +113,10 @@ class OverviewHtml {
 			return (new CDiv($table))->addClass('apm-guide-checks');
 		}
 
-		$signal_names = ['traces' => I18n::t('Traces'), 'logs' => 'Logs', 'metrics' => I18n::t('Metrics')];
+		$signal_names = array_intersect_key(
+			['traces' => I18n::t('Traces'), 'logs' => 'Logs', 'metrics' => I18n::t('Metrics')],
+			array_flip(ApmAccess::signals())
+		);
 
 		foreach ($signal_names as $signal => $name) {
 			$stats = $data['signals'][$signal] ?? null;
@@ -247,7 +250,10 @@ class OverviewHtml {
 
 		$block->addItem((new CSection($source_grid))->setHeader(new CTag('h4', true, I18n::t('Data source'))));
 
-		$signal_names = ['traces' => I18n::t('Traces'), 'logs' => 'Logs', 'metrics' => I18n::t('Metrics')];
+		$signal_names = array_intersect_key(
+			['traces' => I18n::t('Traces'), 'logs' => 'Logs', 'metrics' => I18n::t('Metrics')],
+			array_flip(ApmAccess::signals())
+		);
 		$signal_actions = ['traces' => 'apm.trace.list', 'logs' => 'apm.log.list', 'metrics' => 'apm.metric.list'];
 
 		$signals = (new CDiv())->addClass('apm-overview-signals');
@@ -474,8 +480,9 @@ class OverviewHtml {
 				(new CCol([
 					new CLink(I18n::t('Traces'), self::getTracesUrl($ctx, $service['service'])),
 					' · ',
-					new CLink('Logs', self::getLogsUrl($ctx, $service['service'])),
-					' · ',
+					in_array('logs', ApmAccess::signals(), true)
+						? [new CLink('Logs', self::getLogsUrl($ctx, $service['service'])), ' · ']
+						: null,
 					(new CLink(I18n::t('Slowness'), ServiceMap::getServiceUrl($service['service'])))
 						->setTitle(I18n::t('Where the time of this service goes'))
 				]))->addClass(ZBX_STYLE_NOWRAP)

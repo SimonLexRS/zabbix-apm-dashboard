@@ -89,6 +89,24 @@ Los Super admin siempre pueden.
 
 ![Rol de usuario](screenshots/install-user-role.png)
 
+### Quién ve qué
+
+Los módulos aplican los mismos permisos de Zabbix que las páginas APM nativas, así que no hay nada que configurar en
+ellos:
+
+| Ajuste de Zabbix | Efecto en APM Overview y en los widgets |
+|---|---|
+| Rol, *Access to UI elements* → **APM → Traces** | La página, la entrada del menú y los widgets. Sin él, nada |
+| Rol → **APM → Logs** / **APM → Metrics** | Las cifras de logs y métricas (Status, Cómo funciona, Web Vitals) y los enlaces a las páginas Logs y Metrics. Sin ellos, esas partes se ocultan y no se consultan |
+| Grupo de usuarios → **APM filter** (atributos de recurso) | Solo la telemetría que coincide: pestañas de aplicación, todas las pestañas, los widgets (también con *Application* vacío) y los spans de las trazas lentas. Los filtros se suman (cualquiera de ellos), entre todos los grupos del usuario; *Category* limita un filtro a trazas, métricas o logs. Sin filtro = todo |
+| Grupo de usuarios → **Host permissions** sobre `apm-<namespace>` | El host de la aplicación, sus items y triggers (Cómo funciona solo muestra el host a quien puede leerlo) |
+| Tipo de usuario **Super admin** | Todo; los APM filters no se aplican, igual que en Zabbix |
+
+Para limitar un equipo a su aplicación: **Users → User groups → <grupo> → APM filter** → Key `service.namespace`, Value
+`<namespace>`, Category *All*. El mismo filtro limita las páginas nativas **APM → Traces / Logs / Metrics**.
+
+![APM filter de un grupo de usuarios](screenshots/install-apm-filter.png)
+
 ## 5. Widgets en un dashboard
 
 Edita un dashboard → **Add widget** → tipo **APM service map** o **APM service health**. Ambos tienen un campo
@@ -112,6 +130,7 @@ Edita un dashboard → **Add widget** → tipo **APM service map** o **APM servi
 | "The APM data source is not configured" | Paso 3 |
 | "Cannot query the APM data source" | URL o usuario desde el punto de vista del Zabbix **server/frontend** (en Docker, el nombre del servicio, no `localhost`) |
 | No aparece *APM → Overview*, o "Access denied" | El rol no tiene **APM → Traces** o no tiene los módulos en *Access to modules* (paso 4) |
+| Un usuario ve menos aplicaciones que un administrador | APM filter de sus grupos de usuarios ([Quién ve qué](#quién-ve-qué)) |
 | Un widget dice que necesita APM Overview | Habilita también el módulo **APM Overview** |
 
 Más: [troubleshooting.md](troubleshooting.md). Siguiente: conectar una aplicación con
