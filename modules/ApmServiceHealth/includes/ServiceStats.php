@@ -37,8 +37,8 @@ class ServiceStats {
 			->select('countIf(StatusCode=\'Error\')', 'errors')
 			->select('quantiles(0.5,0.95,0.99)(Duration)', 'q')
 			->from('otel_traces')
-			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => $time_from])
-			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => $time_till])
+			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
+			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]])
 			->where('ParentSpanId=\'\'')
 			->group('ServiceName');
 
@@ -46,7 +46,7 @@ class ServiceStats {
 			$pattern = addcslashes($service, '\\%_');
 			$pattern = str_contains($pattern, '*') ? str_replace('*', '%', $pattern) : '%'.$pattern.'%';
 
-			$query->where('ServiceName LIKE {service:String}', ['service' => $pattern]);
+			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', $pattern]]);
 		}
 
 		$query
@@ -107,10 +107,10 @@ class ServiceStats {
 			->select('toUnixTimestamp(toStartOfMinute(Timestamp))', 'bucket')
 			->select('count()', 'requests')
 			->from('otel_traces')
-			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => $series_from])
-			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => $series_till])
+			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $series_from]])
+			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $series_till]])
 			->where('ParentSpanId=\'\'')
-			->where('has({services:Array(String)},ServiceName)', ['services' => array_values($services)])
+			->where('has({services:Array(String)},ServiceName)', ['services' => ['String', array_values($services)]])
 			->group('ServiceName')
 			->group('bucket');
 

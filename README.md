@@ -27,7 +27,7 @@ More in [docs/screenshots](docs/screenshots).
 
 ## Requirements
 
-- **Zabbix 8.0** or later, with its APM data source configured (Administration → Data source → APM): the modules reuse
+- **Zabbix 8.0.0rc3** or later (rc3 changed the ClickHouse query parameters), with its APM data source configured (Administration → Data source → APM): the modules reuse
   that ClickHouse connection and the native trace viewer.
 - **ClickHouse** with the tables of the OpenTelemetry Collector `clickhouse` exporter (`otel_traces`, `otel_logs`,
   `otel_metrics_*`), written by an OpenTelemetry Collector or the APM collector of a Zabbix proxy.

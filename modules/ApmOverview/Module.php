@@ -3,15 +3,21 @@
 namespace Modules\ApmOverview;
 
 use APP,
+	CControllerTimeSelectorUpdate,
 	CMenuItem,
 	CRoleHelper,
 	CWebUser;
+
+use Modules\ApmOverview\Actions\Overview;
 
 use Zabbix\Core\CModule;
 
 class Module extends CModule {
 
 	public function init(): void {
+		// The core time selector only saves the period of the profiles it lists.
+		CControllerTimeSelectorUpdate::$profiles[] = Overview::PROFILE_IDX.'.filter';
+
 		if (!CWebUser::checkAccess(CRoleHelper::UI_APM_TRACES)) {
 			return;
 		}

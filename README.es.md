@@ -20,7 +20,7 @@ Español e inglés: el idioma sigue al usuario de Zabbix (español para `es_*`, 
 
 ## Requisitos
 
-- **Zabbix 8.0** o posterior, con su fuente de datos APM configurada (Administration → Data source → APM): los módulos
+- **Zabbix 8.0.0rc3** o posterior (la rc3 cambió los parámetros de las consultas a ClickHouse), con su fuente de datos APM configurada (Administration → Data source → APM): los módulos
   usan esa conexión a ClickHouse y el visor de trazas nativo.
 - **ClickHouse** con las tablas del exportador `clickhouse` del OpenTelemetry Collector (`otel_traces`, `otel_logs`,
   `otel_metrics_*`), escritas por un OpenTelemetry Collector o por el colector APM de un proxy de Zabbix.

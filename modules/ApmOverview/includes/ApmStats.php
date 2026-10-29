@@ -89,7 +89,7 @@ class ApmStats {
 			' LIMIT '.$limit;
 
 		return array_map(static fn(array $row): string => (string) $row['service'],
-			iterator_to_array($this->db->fetch($sql, ['seconds' => $seconds]), false)
+			iterator_to_array($this->db->fetch($sql, ['seconds' => ['UInt32', $seconds]]), false)
 		);
 	}
 
@@ -109,8 +109,8 @@ class ApmStats {
 					->select('count()', 'rows')
 					->select('toUnixTimestamp(max('.$time_column.'))', 'last')
 					->from($table)
-					->where($time_column.'>=toDateTime64({time_from:Int32},9)', ['time_from' => $time_from])
-					->where($time_column.'<toDateTime64({time_till:Int32},9)', ['time_till' => $time_till]);
+					->where($time_column.'>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
+					->where($time_column.'<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]]);
 
 				try {
 					$row = $this->db->fetch($query->getSql(), $query->getParams())->current();
@@ -149,13 +149,13 @@ class ApmStats {
 			->select('countIf(StatusCode=\'Error\')', 'errors')
 			->select('quantiles(0.5,0.95,0.99)(Duration)', 'q')
 			->from('otel_traces')
-			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => $time_from])
-			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => $time_till])
+			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
+			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]])
 			->where('ParentSpanId=\'\'')
 			->group('ServiceName');
 
 		if ($service !== '') {
-			$query->where('ServiceName LIKE {service:String}', ['service' => self::toLikePattern($service)]);
+			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', self::toLikePattern($service)]]);
 		}
 
 		$query
@@ -199,14 +199,14 @@ class ApmStats {
 			->select('countIf(StatusCode=\'Error\')', 'errors')
 			->select('quantile(0.95)(Duration)', 'p95')
 			->from('otel_traces')
-			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => $series_from])
-			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => $series_till])
+			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $series_from]])
+			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $series_till]])
 			->where('ParentSpanId=\'\'')
 			->group('ServiceName')
 			->group('bucket');
 
 		if ($service !== '') {
-			$query->where('ServiceName LIKE {service:String}', ['service' => self::toLikePattern($service)]);
+			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', self::toLikePattern($service)]]);
 		}
 
 		$empty = array_fill_keys($buckets, 0);
@@ -258,18 +258,18 @@ class ApmStats {
 			->select('quantiles(0.5,0.95,0.99)(Duration)', 'q')
 			->select('arraySort(groupUniqArray(4)('.self::HTTP_STATUS.'))', 'codes')
 			->from('otel_traces')
-			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => $time_from])
-			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => $time_till])
+			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
+			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]])
 			->where('SpanKind=\'Server\'')
 			->group('ServiceName')
 			->group('SpanName');
 
 		if ($service !== '') {
-			$query->where('ServiceName LIKE {service:String}', ['service' => self::toLikePattern($service)]);
+			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', self::toLikePattern($service)]]);
 		}
 
 		if ($exact_service !== '') {
-			$query->where('ServiceName={exact_service:String}', ['exact_service' => $exact_service]);
+			$query->where('ServiceName={exact_service:String}', ['exact_service' => ['String', $exact_service]]);
 		}
 
 		$query
@@ -486,9 +486,9 @@ class ApmStats {
 			self::LOW_MEMORY;
 
 		$params = [
-			'time_from' => $time_from - SEC_PER_MIN,
-			'time_till' => $time_till + SEC_PER_MIN,
-			'traceids' => array_keys($traces)
+			'time_from' => ['Int32', $time_from - SEC_PER_MIN],
+			'time_till' => ['Int32', $time_till + SEC_PER_MIN],
+			'traceids' => ['String', array_keys($traces)]
 		];
 
 		foreach ($this->db->fetch($sql, $params) as $row) {
@@ -576,8 +576,9 @@ class ApmStats {
 
 		$rows = [];
 
-		foreach ($this->fetch($sql, 2 * $time_from - $time_till, $time_till, $service, ['period_start' => $time_from])
-				as $row) {
+		$params = ['period_start' => ['Int32', $time_from]];
+
+		foreach ($this->fetch($sql, 2 * $time_from - $time_till, $time_till, $service, $params) as $row) {
 			$rows[] = [
 				'service' => (string) $row['service'],
 				'endpoint' => (string) $row['endpoint'],
@@ -626,7 +627,7 @@ class ApmStats {
 		foreach ($queries as $key => $sql) {
 			$result[$key] = [];
 
-			foreach ($this->fetch($sql, $time_from, $time_till, $service, ['t' => $threshold]) as $row) {
+			foreach ($this->fetch($sql, $time_from, $time_till, $service, ['t' => ['UInt64', $threshold]]) as $row) {
 				$requests = (int) $row['requests'];
 				$satisfied = (int) $row['satisfied'];
 				$tolerating = (int) $row['tolerating'];
@@ -763,10 +764,10 @@ class ApmStats {
 	 */
 	private function fetch(string $sql, int $time_from, int $time_till, string $service = '',
 			array $params = []): \Generator {
-		$params += ['time_from' => $time_from, 'time_till' => $time_till];
+		$params += ['time_from' => ['Int32', $time_from], 'time_till' => ['Int32', $time_till]];
 
 		if ($service !== '') {
-			$params['service'] = self::toLikePattern($service);
+			$params['service'] = ['String', self::toLikePattern($service)];
 		}
 
 		return $this->db->fetch($sql, $params);

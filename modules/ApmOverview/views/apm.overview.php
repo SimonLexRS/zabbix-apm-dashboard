@@ -253,6 +253,23 @@ if ($data['filter']['endpoint_service'] !== '') {
 		}
 	});
 
+	// The core profile.update rejects the profiles of module pages: the active filter tab is saved by the module.
+	const update_user_profile = window.updateUserProfile;
+
+	window.updateUserProfile = (idx, value, ...args) => {
+		if (idx !== '.json_encode($data['filter_options']['idx'].'.active').') {
+			return update_user_profile(idx, value, ...args);
+		}
+
+		const body = new FormData();
+		body.set("value_int", value);
+		body.set(CSRF_TOKEN_NAME, '.json_encode(CCsrfTokenHelper::get('apm.overview.filter.active')).');
+
+		return fetch('.json_encode((new CUrl('zabbix.php'))->setArgument('action', 'apm.overview.filter.active')->getUrl()).',
+			{method: "POST", body}
+		);
+	};
+
 	if (typeof CApmOverviewLive === "function") {
 		new CApmOverviewLive('.json_encode([
 			'data_url' => $data['data_url'],

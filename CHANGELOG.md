@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1
+
+- Zabbix 8.0.0rc3 support: ClickHouse query parameters are passed with their type (`[type, value]`), as rc3 requires.
+  On rc3, APM Overview failed with HTTP 500 and the service map and service health widgets did not load.
+- APM Overview: changing the time period no longer fails with `Incorrect value "web.apm.overview.filter" for "idx"
+  field`, and the active filter tab is remembered.
+
 ## 1.3.0
 
 First public release.
