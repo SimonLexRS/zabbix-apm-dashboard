@@ -133,6 +133,12 @@ OK   Unset average duration: Zabbix 0.0881 s, ClickHouse 0.0881 s
    No PHP warnings and no ClickHouse errors in any tab. `php tests/run.php` checks the condition built from the
    filters (values always passed as query parameters).
 
+9. **Real user monitoring.** On the tested Zabbix, with the OpenTelemetry Demo frontend sending:
+   - **Figures:** the Overview showed 913 sessions, 912 page loads, 1,341 actions and 20,069 browser requests for the last hour. A direct ClickHouse count one second later gave 913, 913, 1,344 and 20,093; the difference is spans still arriving at the edge of the window.
+   - **How it works checks:** 4,944 of 4,944 request traces continued in a backend service.
+   - **Session timeline:** each request showed its backend path, e.g. `GET /api/cart → frontend-proxy → frontend → cart → flagd`.
+   - **Lab (PostgreSQL, PHP 8.5):** browser spans of two applications were sent, `web-a` and `web-b`. A user whose group has the APM filter `service.namespace = web-a` saw only the `web-a` tab and its session, also when the URL asked for `web-b`. Super admin saw both. No PHP warnings.
+
 ## How to read the checks
 
 - A value collected at time T counts the spans of [T − 70 s, T − 10 s) (`{$OTLP.GRANULARITY}` 1m,

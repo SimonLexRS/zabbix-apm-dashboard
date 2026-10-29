@@ -135,3 +135,10 @@ All queries are limited to browser telemetry, the application and the user's APM
   - every request with a backend trace has to show as linked;
   - the page is checked as Super admin and as a user with an APM filter.
 - **Docs:** EN and ES, with screenshots of this module only. CHANGELOG 2.0.0.
+
+## Implementation notes (2.0.0)
+
+- **Calculated in ClickHouse:** page normalisation and resource kind, so that percentiles are grouped exactly. PHP only parses user agents, load phases and the timeline (`includes/Rum.php`).
+- **Page waterfall:** shown when a page is chosen (a link per page, kept in the page filter) instead of a lazily loaded row.
+- **Application tabs:** only the applications with browser telemetry; all applications when none has it, so that the guide shows.
+- **Deferred:** failed requests per page (request spans do not carry the page URL), the browser filter, and an instrumented web page in the lab. The OpenTelemetry Demo covers forks.

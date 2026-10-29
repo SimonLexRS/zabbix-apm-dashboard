@@ -10,14 +10,15 @@ use CController,
 use Modules\ApmOverview\Includes\I18n;
 
 /**
- * Saves the active tab of the overview page filter (0 = collapsed). The core profile.update only accepts the profiles
- * of its own pages, so the page script sends this one here.
+ * Saves the active tab of the filter of the overview and real user monitoring pages (0 = collapsed). The core
+ * profile.update only accepts the profiles of its own pages, so the page scripts send them here.
  */
 class FilterActive extends CController {
 
 	protected function checkInput(): bool {
 		$ret = $this->validateInput([
-			'value_int' => 'required|in 0,1,2'
+			'value_int' => 'required|in 0,1,2',
+			'page' => 'in rum'
 		]);
 
 		if (!$ret) {
@@ -36,7 +37,9 @@ class FilterActive extends CController {
 	}
 
 	protected function doAction(): void {
-		CProfile::update(Overview::PROFILE_IDX.'.filter.active', $this->getInput('value_int'), PROFILE_TYPE_INT);
+		$idx = $this->getInput('page', '') === 'rum' ? Rum::PROFILE_IDX : Overview::PROFILE_IDX;
+
+		CProfile::update($idx.'.filter.active', $this->getInput('value_int'), PROFILE_TYPE_INT);
 
 		$this->setResponse(
 			(new CControllerResponseData(['main_block' => json_encode(['result' => true])]))->disableView()

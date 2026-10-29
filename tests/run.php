@@ -15,6 +15,7 @@ namespace {
 	require $root.'/ApmOverview/includes/I18n.php';
 	require $root.'/ApmOverview/includes/ApmAccess.php';
 	require $root.'/ApmOverview/includes/ApmStats.php';
+	require $root.'/ApmOverview/includes/Rum.php';
 	require $root.'/ApmOverview/includes/ServiceMap.php';
 	require $root.'/ApmOverview/includes/Integration.php';
 
@@ -43,6 +44,49 @@ namespace Modules\ApmOverview\Includes {
 	check('app gone falls back to first', ApmStats::resolveApplication(['apm-demo', 'flowspock'], 'old'), 'apm-demo');
 	check('app no namespace', ApmStats::resolveApplication(['', 'flowspock'], ''), '');
 	check('app none', ApmStats::resolveApplication([], 'flowspock'), null);
+	check('app never chosen is not the no-namespace tab', ApmStats::resolveApplication(['flowspock', ''], null), 'flowspock');
+
+	// Real user monitoring: user agents, load phases, session timeline.
+	check('rum ua headless', Rum::userAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36'),
+		['browser' => 'Chrome (headless)', 'os' => 'Linux', 'device' => 'desktop']
+	);
+	check('rum ua edge', Rum::userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0')['browser'], 'Edge');
+	check('rum ua firefox', Rum::userAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:132.0) Gecko/20100101 Firefox/132.0'),
+		['browser' => 'Firefox', 'os' => 'macOS', 'device' => 'desktop']
+	);
+	check('rum ua iphone', Rum::userAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1'),
+		['browser' => 'Safari', 'os' => 'iOS', 'device' => 'mobile']
+	);
+	check('rum ua android', Rum::userAgent('Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'),
+		['browser' => 'Chrome', 'os' => 'Android', 'device' => 'mobile']
+	);
+	check('rum ua unknown', Rum::userAgent('curl/8.5'), ['browser' => 'Other', 'os' => 'Other', 'device' => 'desktop']);
+
+	$load = Rum::loadPhases(['fetchStart' => 0, 'domainLookupStart' => 1, 'domainLookupEnd' => 3, 'connectStart' => 3,
+		'connectEnd' => 8, 'requestStart' => 8, 'responseStart' => 40, 'responseEnd' => 45, 'domInteractive' => 350,
+		'domComplete' => 640, 'loadEventStart' => 640, 'loadEventEnd' => 642, 'firstContentfulPaint' => 379
+	]);
+	check('rum phases without tls', array_column($load['phases'], 'key'),
+		['dns', 'connection', 'request', 'response', 'dom', 'resources', 'load_event']
+	);
+	check('rum phase connection to connectEnd', $load['phases'][1], ['key' => 'connection', 'start' => 3.0, 'end' => 8.0]);
+	check('rum phases total and marker', [$load['total'], $load['markers']], [642.0, ['firstContentfulPaint' => 379.0]]);
+	check('rum phases render only', array_column(Rum::loadPhases(['fetchStart' => 0, 'domInteractive' => 350,
+		'domComplete' => 641, 'loadEventStart' => 641, 'loadEventEnd' => 642])['phases'], 'key'),
+		['dom', 'resources', 'load_event']
+	);
+	check('rum phases none', Rum::loadPhases([]), ['phases' => [], 'markers' => [], 'total' => 0.0]);
+
+	$timeline = Rum::timeline([
+		['type' => 'request', 'trace' => 't2', 'start' => 3000000000],
+		['type' => 'view', 'trace' => 't0', 'start' => 1000000000],
+		['type' => 'action', 'trace' => 't2', 'start' => 2900000000],
+		['type' => 'request', 'trace' => 't9', 'start' => 2000000000]
+	]);
+	check('rum timeline order', array_column($timeline, 'type'), ['view', 'request', 'action']);
+	check('rum timeline offsets', array_column($timeline, 'offset_ms'), [0.0, 1000.0, 1900.0]);
+	check('rum timeline nesting', array_column($timeline[2]['requests'], 'trace'), ['t2']);
+	check('rum timeline empty', Rum::timeline([]), []);
 
 	// APM filter of the user groups: no filters, no condition; values of one key in one IN; keys joined with OR; every
 	// value is a parameter.

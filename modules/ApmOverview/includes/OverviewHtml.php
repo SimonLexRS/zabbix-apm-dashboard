@@ -64,7 +64,7 @@ class OverviewHtml {
 
 	public const DOCS_URL = 'https://github.com/SimonLexRS/zabbix-apm-dashboard';
 
-	private const WEB_VITAL_RATINGS = ['good' => 'Good', 'warn' => 'Needs improvement', 'bad' => 'Poor'];
+	public const WEB_VITAL_RATINGS = ['good' => 'Good', 'warn' => 'Needs improvement', 'bad' => 'Poor'];
 
 	/**
 	 * Render the refreshable block of a tab.
@@ -586,49 +586,17 @@ class OverviewHtml {
 	 * What people feel: Web Vitals from real browsers, Apdex and the latency distribution of the server.
 	 */
 	public static function userExperience(array $data, array $ctx): CDiv {
-		$block = new CDiv();
+		$block = new CDiv(
+			(new CDiv([
+				I18n::t('Page loads, sessions, user actions and the requests of each page, from the browser spans: '),
+				new CLink(I18n::t('Real user monitoring'), (new CUrl('zabbix.php'))->setArgument('action', 'apm.rum'))
+			]))->addClass('apm-overview-hint')
+		);
 		$vitals = $data['vitals'];
 
 		// Web Vitals cards.
 		if ($vitals['overall']) {
-			$cards = (new CDiv())->addClass('apm-ux-cards');
-
-			foreach (self::WEB_VITALS as $metric => [$label, $unit, $good, $poor]) {
-				$row = $vitals['overall'][$metric] ?? null;
-
-				if ($row === null) {
-					$cards->addItem(
-						(new CDiv([
-							(new CDiv(I18n::t($label)))->addClass('apm-ux-card-title'),
-							(new CDiv('—'))->addClass('apm-ux-card-value'),
-							(new CDiv(I18n::t('No measurements')))->addClass(ZBX_STYLE_GREY)
-						]))->addClass('apm-ux-card')
-					);
-					continue;
-				}
-
-				$rating = self::vitalRating($metric, $row['p75']);
-				$hourly = $vitals['hourly'][$metric] ?? [];
-
-				$cards->addItem(
-					(new CDiv([
-						(new CDiv(I18n::t($label)))->addClass('apm-ux-card-title'),
-						(new CDiv([
-							(new CSpan(self::formatVital($metric, $row['p75'])))->addClass('apm-ux-'.$rating),
-							(new CSpan(I18n::t(self::WEB_VITAL_RATINGS[$rating])))->addClass('apm-ux-badge')->addClass('apm-ux-'.$rating)
-						]))->addClass('apm-ux-card-value'),
-						(new CDiv(sprintf(I18n::t('p75 of %s visits · %.0f %% poor'), self::formatCount($row['samples']),
-							$row['samples'] > 0 ? $row['poor'] / $row['samples'] * 100 : 0
-						)))->addClass(ZBX_STYLE_GREY),
-						(new CDiv(sprintf(I18n::t('Good ≤ %s · Poor > %s'), self::formatVital($metric, $good),
-							self::formatVital($metric, $poor)
-						)))->addClass(ZBX_STYLE_GREY),
-						count($hourly) > 1
-							? self::sparkline($hourly, 'apm-spark-p95', I18n::t('p75 per hour in the period'))
-							: null
-					]))->addClass('apm-ux-card')
-				);
-			}
+			$cards = self::vitalCards($vitals);
 
 			$pages = $vitals['pages'];
 			uasort($pages, static fn(array $a, array $b): int =>
@@ -735,6 +703,54 @@ class OverviewHtml {
 		);
 
 		return $block;
+	}
+
+	/**
+	 * Core Web Vitals cards: p75, rating, share of poor visits, thresholds and the hourly trend.
+	 *
+	 * @param array $vitals  Output of ApmStats::getWebVitals().
+	 */
+	public static function vitalCards(array $vitals): CDiv {
+		$cards = (new CDiv())->addClass('apm-ux-cards');
+
+		foreach (self::WEB_VITALS as $metric => [$label, $unit, $good, $poor]) {
+			$row = $vitals['overall'][$metric] ?? null;
+
+			if ($row === null) {
+				$cards->addItem(
+					(new CDiv([
+						(new CDiv(I18n::t($label)))->addClass('apm-ux-card-title'),
+						(new CDiv('—'))->addClass('apm-ux-card-value'),
+						(new CDiv(I18n::t('No measurements')))->addClass(ZBX_STYLE_GREY)
+					]))->addClass('apm-ux-card')
+				);
+				continue;
+			}
+
+			$rating = self::vitalRating($metric, $row['p75']);
+			$hourly = $vitals['hourly'][$metric] ?? [];
+
+			$cards->addItem(
+				(new CDiv([
+					(new CDiv(I18n::t($label)))->addClass('apm-ux-card-title'),
+					(new CDiv([
+						(new CSpan(self::formatVital($metric, $row['p75'])))->addClass('apm-ux-'.$rating),
+						(new CSpan(I18n::t(self::WEB_VITAL_RATINGS[$rating])))->addClass('apm-ux-badge')->addClass('apm-ux-'.$rating)
+					]))->addClass('apm-ux-card-value'),
+					(new CDiv(sprintf(I18n::t('p75 of %s visits · %.0f %% poor'), self::formatCount($row['samples']),
+						$row['samples'] > 0 ? $row['poor'] / $row['samples'] * 100 : 0
+					)))->addClass(ZBX_STYLE_GREY),
+					(new CDiv(sprintf(I18n::t('Good ≤ %s · Poor > %s'), self::formatVital($metric, $good),
+						self::formatVital($metric, $poor)
+					)))->addClass(ZBX_STYLE_GREY),
+					count($hourly) > 1
+						? self::sparkline($hourly, 'apm-spark-p95', I18n::t('p75 per hour in the period'))
+						: null
+				]))->addClass('apm-ux-card')
+			);
+		}
+
+		return $cards;
 	}
 
 	/**
@@ -984,7 +1000,7 @@ class OverviewHtml {
 	/**
 	 * Notice in a section whose query failed (the rest of the tab still shows), null when it worked.
 	 */
-	private static function sectionNotice(array $data, string $key): ?CDiv {
+	public static function sectionNotice(array $data, string $key): ?CDiv {
 		if (!array_key_exists($key, $data['section_errors'] ?? [])) {
 			return null;
 		}
@@ -998,7 +1014,7 @@ class OverviewHtml {
 	/**
 	 * Notice when the data source is missing or failing, null when it works.
 	 */
-	private static function sourceNotice(array $data): ?CDiv {
+	public static function sourceNotice(array $data): ?CDiv {
 		if ($data['source']['origin'] === null) {
 			return new CDiv(makeMessageBox(ZBX_STYLE_MSG_WARNING, [], I18n::t('The APM data source is not configured.'), false));
 		}
@@ -1176,13 +1192,13 @@ class OverviewHtml {
 		return $cells;
 	}
 
-	private static function vitalRating(string $metric, float $value): string {
+	public static function vitalRating(string $metric, float $value): string {
 		[, , $good, $poor] = self::WEB_VITALS[$metric];
 
 		return $value <= $good ? 'good' : ($value <= $poor ? 'warn' : 'bad');
 	}
 
-	private static function formatVital(string $metric, float $value): string {
+	public static function formatVital(string $metric, float $value): string {
 		return self::WEB_VITALS[$metric][1] === 'ms'
 			? ApmStats::formatDuration($value * 1000000)
 			: sprintf('%.2f', $value);
@@ -1236,7 +1252,7 @@ class OverviewHtml {
 		return $pill;
 	}
 
-	private static function traceLink(string $traceid, int $clock, ?string $label = null): CLink {
+	public static function traceLink(string $traceid, int $clock, ?string $label = null): CLink {
 		return (new CLink($label ?? substr($traceid, 0, 8).'…', self::getTraceUrl($traceid, $clock)))
 			->addClass($label === null ? 'apm-overview-traceid' : null)
 			->setTitle(sprintf(I18n::t('Trace ID %s · open in the trace viewer'), $traceid));
@@ -1252,13 +1268,13 @@ class OverviewHtml {
 		]);
 	}
 
-	private static function hint(string $text): CDiv {
+	public static function hint(string $text): CDiv {
 		return (new CDiv($text))
 			->addClass(ZBX_STYLE_GREY)
 			->addClass('apm-overview-hint');
 	}
 
-	private static function formatTime(int $clock): string {
+	public static function formatTime(int $clock): string {
 		return zbx_date2str(date('Ymd', $clock) === date('Ymd') ? 'H:i:s' : DATE_TIME_FORMAT_SECONDS, $clock);
 	}
 
@@ -1266,11 +1282,11 @@ class OverviewHtml {
 		return $rpm >= 10 ? (string) round($rpm) : sprintf('%.1f', $rpm);
 	}
 
-	private static function formatCount(int $value): string {
+	public static function formatCount(int $value): string {
 		return number_format($value, 0, '.', ' ');
 	}
 
-	private static function truncate(string $text, int $length): string {
+	public static function truncate(string $text, int $length): string {
 		return mb_strlen($text) > $length ? mb_substr($text, 0, $length).'…' : $text;
 	}
 }

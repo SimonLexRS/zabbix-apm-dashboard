@@ -916,3 +916,258 @@ span.apm-ux-bad:not(.apm-ux-badge) {
 .apm-guide-checks .list-table {
 	margin-top: 6px;
 }
+
+/* Real user monitoring page. */
+.apm-rum-kpis {
+	grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+	margin: 4px 0 12px;
+}
+
+.apm-rum-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+	gap: 0 24px;
+}
+
+.apm-rum-activity-wrap {
+	max-width: 1100px;
+}
+
+.apm-rum-activity {
+	display: block;
+	width: 100%;
+	height: 120px;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+}
+
+.apm-rum-activity-bar {
+	fill: #3b82f6;
+	opacity: 0.55;
+}
+
+.apm-rum-activity-bar:hover {
+	opacity: 0.9;
+}
+
+.apm-rum-activity-line {
+	fill: none;
+	stroke: #e8a000;
+	stroke-width: 2;
+	vector-effect: non-scaling-stroke;
+}
+
+.apm-rum-activity-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 18px;
+	margin-top: 6px;
+}
+
+.apm-rum-key-bar::before,
+.apm-rum-key-line::before {
+	content: "";
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	margin-right: 6px;
+	vertical-align: -1px;
+	background-color: #3b82f6;
+	opacity: 0.55;
+}
+
+.apm-rum-key-line::before {
+	height: 2px;
+	vertical-align: 3px;
+	background-color: #e8a000;
+	opacity: 1;
+}
+
+.apm-rum-shares {
+	display: grid;
+	gap: 6px;
+	max-width: 520px;
+}
+
+.apm-rum-share {
+	display: grid;
+	grid-template-columns: 150px 1fr 48px;
+	align-items: center;
+	gap: 8px;
+}
+
+.apm-rum-share-track {
+	height: 10px;
+	border-radius: 5px;
+	background-color: rgba(128, 128, 128, 0.18);
+	overflow: hidden;
+}
+
+.apm-rum-share-bar {
+	height: 100%;
+	background-color: #3b82f6;
+}
+
+.apm-rum-share-value {
+	text-align: right;
+}
+
+.apm-rum-waterfalls {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+	gap: 12px 24px;
+	margin-bottom: 10px;
+}
+
+.apm-rum-wf-title {
+	margin-bottom: 6px;
+}
+
+.apm-rum-wf-row {
+	display: grid;
+	grid-template-columns: 210px 1fr 70px;
+	align-items: center;
+	gap: 8px;
+	min-height: 20px;
+}
+
+.apm-rum-wf-track {
+	position: relative;
+	height: 12px;
+	background-color: rgba(128, 128, 128, 0.12);
+}
+
+.apm-rum-wf-bar {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	border-radius: 2px;
+	background-color: #3b82f6;
+}
+
+.apm-rum-wf-mark {
+	position: absolute;
+	top: -3px;
+	bottom: -3px;
+	width: 2px;
+	background-color: #e45959;
+}
+
+.apm-rum-wf-ms {
+	text-align: right;
+}
+
+.apm-rum-phase-redirect,
+.apm-rum-phase-dns { background-color: #06b6d4; }
+.apm-rum-phase-connection,
+.apm-rum-phase-tls { background-color: #6366f1; }
+.apm-rum-phase-request { background-color: #e8a000; }
+.apm-rum-phase-response { background-color: #10b981; }
+.apm-rum-phase-dom { background-color: #3b82f6; }
+.apm-rum-phase-resources { background-color: #a855f7; }
+.apm-rum-phase-load_event { background-color: #84cc16; }
+
+.apm-rum-panel {
+	position: fixed;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 1000;
+	width: min(760px, 92vw);
+	display: flex;
+	flex-direction: column;
+	background-color: #fff;
+	box-shadow: -4px 0 18px rgba(0, 0, 0, 0.25);
+}
+
+html[color-scheme="dark"] .apm-rum-panel {
+	background-color: #2b2b2b;
+}
+
+.apm-rum-panel[hidden] {
+	display: none;
+}
+
+.apm-rum-panel-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 16px;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+}
+
+.apm-rum-panel-close {
+	border: 0;
+	background: none;
+	color: inherit;
+	font-size: 22px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.apm-rum-panel-body {
+	flex: 1;
+	overflow: auto;
+	padding: 12px 16px;
+}
+
+.apm-rum-session-head {
+	margin-bottom: 12px;
+	line-height: 1.6;
+}
+
+.apm-rum-timeline,
+.apm-rum-timeline-nested {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.apm-rum-timeline > li {
+	display: grid;
+	grid-template-columns: 64px 1fr;
+	gap: 0 10px;
+	padding: 6px 0 6px 10px;
+	border-left: 3px solid rgba(128, 128, 128, 0.35);
+}
+
+.apm-rum-timeline > li.apm-rum-view {
+	border-left-color: #3b82f6;
+}
+
+.apm-rum-timeline > li.apm-rum-action {
+	border-left-color: #a855f7;
+}
+
+.apm-rum-timeline-nested {
+	grid-column: 2;
+	margin-top: 4px;
+}
+
+.apm-rum-timeline-nested > li {
+	display: grid;
+	grid-template-columns: 64px 1fr;
+	gap: 0 10px;
+	padding: 3px 0;
+}
+
+.apm-rum-offset {
+	color: #768d99;
+	font-variant-numeric: tabular-nums;
+}
+
+.apm-rum-event {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 8px;
+	word-break: break-word;
+}
+
+.apm-rum-kind {
+	min-width: 72px;
+	font-weight: bold;
+}
+
+.apm-rum-backend {
+	color: #768d99;
+}

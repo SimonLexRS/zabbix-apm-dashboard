@@ -554,3 +554,72 @@ class CApmServiceMapInteraction {
 }
 
 CApmServiceMapInteraction.init();
+
+/**
+ * Side panel of the Real user monitoring page: the timeline of a session (apm.rum.session), opened from the Sessions
+ * tab. The HTML comes rendered and escaped by the server.
+ */
+class CApmRumSessions {
+
+	constructor({session_url, labels}) {
+		this._url = session_url;
+		this._labels = labels;
+		this._panel = document.getElementById('apm-rum-panel');
+		this._body = this._panel.querySelector('.apm-rum-panel-body');
+		this._close = this._panel.querySelector('.apm-rum-panel-close');
+		this._opener = null;
+		this._request = null;
+
+		document.addEventListener('click', (e) => {
+			const button = e.target.closest('[data-apm-session]');
+
+			if (button !== null) {
+				this.open(button);
+			}
+			else if (e.target.closest('.apm-rum-panel-close') !== null) {
+				this.close();
+			}
+		});
+
+		document.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape' && !this._panel.hidden) {
+				this.close();
+			}
+		});
+	}
+
+	open(button) {
+		this._request?.abort();
+		this._request = new AbortController();
+		this._opener = button;
+		this._body.textContent = this._labels.loading;
+		this._panel.hidden = false;
+		this._close.focus();
+
+		const url = this._url
+			+ '&session=' + encodeURIComponent(button.dataset.apmSession)
+			+ '&from=' + encodeURIComponent(button.dataset.from)
+			+ '&to=' + encodeURIComponent(button.dataset.to);
+
+		fetch(url, {signal: this._request.signal})
+			.then((response) => response.ok ? response.json() : Promise.reject(new Error(response.statusText)))
+			.then((response) => {
+				if (typeof response.html !== 'string') {
+					throw new Error(response.error ?? '');
+				}
+
+				this._body.innerHTML = response.html;
+			})
+			.catch((error) => {
+				if (error.name !== 'AbortError') {
+					this._body.textContent = this._labels.failed;
+				}
+			});
+	}
+
+	close() {
+		this._request?.abort();
+		this._panel.hidden = true;
+		this._opener?.focus();
+	}
+}

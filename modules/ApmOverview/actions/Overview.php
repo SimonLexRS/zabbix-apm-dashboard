@@ -98,7 +98,7 @@ class Overview extends CController {
 		}
 
 		$application = ApmStats::resolveApplication($applications,
-			(string) CProfile::get(self::PROFILE_IDX.'.filter_app', '')
+			CProfile::get(self::PROFILE_IDX.'.filter_app')
 		);
 
 		if ($application !== null) {

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.0.0
+
+- New page **APM → Real user monitoring**, built from the spans of the OpenTelemetry web SDK
+  ([docs/rum.md](docs/rum.md)). One tab per application with browser telemetry, real time, roles and APM filter
+  respected.
+  - **Overview**: sessions, users, page loads, user actions, browser requests and failures, first content visible, Core
+    Web Vitals, activity per minute, slowest pages, requests that fail, browsers and operating systems.
+  - **Pages**: load p75/p95 and first content visible per page (ids folded into `:id`), and the load waterfall of the
+    typical and the slowest load of a page.
+  - **Resources**: resources by kind and host with their network phases; browser requests by method, path and status
+    with their latest trace.
+  - **Sessions**: the most recent sessions, and the timeline of a session in a side panel: page loads, actions and
+    requests, each request with the backend services of its trace, the one that failed and a link to the trace.
+  - **How it works**: how to instrument a web application, with live checks.
+- APM Overview: an application never chosen no longer opens the tab of the spans without a namespace.
+- User experience links to the new page.
+
 ## 1.9.0
 
 - The modules respect Zabbix permissions the way the native APM pages do:

@@ -57,18 +57,18 @@ class ApmStats {
 		'SpanAttributes[\'url.full\']!=\'\',domain(SpanAttributes[\'url.full\']),domain(SpanAttributes[\'http.url\']))';
 
 	// HTTP status: new semantic conventions (Go, Next.js) first, then the old attribute (Python demo).
-	private const HTTP_STATUS = 'if(SpanAttributes[\'http.response.status_code\']!=\'\','.
+	protected const HTTP_STATUS = 'if(SpanAttributes[\'http.response.status_code\']!=\'\','.
 		'SpanAttributes[\'http.response.status_code\'],SpanAttributes[\'http.status_code\'])';
 
 	// Settings of the heavier queries (joins, span reads): fewer threads use less memory on a small ClickHouse.
-	private const LOW_MEMORY = ' SETTINGS max_threads=2';
+	protected const LOW_MEMORY = ' SETTINGS max_threads=2';
 
 	// Period condition, with the {time_from} and {time_till} parameters.
-	private const PERIOD = 'Timestamp>=toDateTime64({time_from:Int32},9) AND Timestamp<toDateTime64({time_till:Int32},9)';
+	protected const PERIOD = 'Timestamp>=toDateTime64({time_from:Int32},9) AND Timestamp<toDateTime64({time_till:Int32},9)';
 
 	private const APPLICATION_CONDITION = 'ResourceAttributes[\'service.namespace\']={app:String}';
 
-	private ApmDbClickHouse $db;
+	protected ApmDbClickHouse $db;
 
 	/**
 	 * Application (service.namespace) the statistics are limited to; null = all applications.
@@ -106,9 +106,10 @@ class ApmStats {
 	}
 
 	/**
-	 * The stored application if it still has data, otherwise the first one; null if there are no applications.
+	 * The stored application if it still has data, otherwise the first one; null if there are no applications. Null
+	 * as stored means never chosen, unlike '' (the spans without a namespace).
 	 */
-	public static function resolveApplication(array $applications, string $stored): ?string {
+	public static function resolveApplication(array $applications, ?string $stored): ?string {
 		if (in_array($stored, $applications, true)) {
 			return $stored;
 		}
@@ -818,7 +819,7 @@ class ApmStats {
 	/**
 	 * Run a query with the {time_from}, {time_till} and, when filtered, {service} parameters.
 	 */
-	private function fetch(string $sql, int $time_from, int $time_till, string $service = '',
+	protected function fetch(string $sql, int $time_from, int $time_till, string $service = '',
 			array $params = []): array {
 		$params += ['time_from' => ['Int32', $time_from], 'time_till' => ['Int32', $time_till]];
 
@@ -835,7 +836,7 @@ class ApmStats {
 	 * E_DEPRECATED is dropped; any other error goes to the Zabbix handler as usual. The rows are read completely here
 	 * because the client closes the connection in the finally block of its generator.
 	 */
-	private static function rows(ApmDbClickHouse $db, string $sql, array $params = []): array {
+	protected static function rows(ApmDbClickHouse $db, string $sql, array $params = []): array {
 		$previous = set_error_handler(
 			static function (int $errno, string $errstr, string $errfile = '', int $errline = 0) use (&$previous): bool {
 				if ($errno === E_DEPRECATED && str_ends_with($errfile, 'ApmDbClickHouse.php')) {
@@ -858,11 +859,11 @@ class ApmStats {
 	 * Period condition of the hand-written queries, limited to what the user may see and to the application when one
 	 * is set.
 	 */
-	private function period(int $signal = ApmAccess::TRACES): string {
+	protected function period(int $signal = ApmAccess::TRACES): string {
 		return self::PERIOD.$this->applicationCondition($signal);
 	}
 
-	private function applicationCondition(int $signal = ApmAccess::TRACES): string {
+	protected function applicationCondition(int $signal = ApmAccess::TRACES): string {
 		$access = self::accessCondition($signal)[0];
 
 		return ($access !== '' ? ' AND '.$access : '')
@@ -872,7 +873,7 @@ class ApmStats {
 	/**
 	 * Parameters of applicationCondition() for every signal, so that one set serves any query.
 	 */
-	private function applicationParams(): array {
+	protected function applicationParams(): array {
 		$params = $this->application !== null ? ['app' => ['String', $this->application]] : [];
 
 		foreach ([ApmAccess::TRACES, ApmAccess::METRICS, ApmAccess::LOGS] as $signal) {
@@ -882,7 +883,7 @@ class ApmStats {
 		return $params;
 	}
 
-	private function whereApplication(CClickHouseQuery $query, int $signal = ApmAccess::TRACES): void {
+	protected function whereApplication(CClickHouseQuery $query, int $signal = ApmAccess::TRACES): void {
 		[$access, $params] = self::accessCondition($signal);
 
 		if ($access !== '') {
@@ -894,7 +895,7 @@ class ApmStats {
 		}
 	}
 
-	private static function accessCondition(int $signal): array {
+	protected static function accessCondition(int $signal): array {
 		return ApmAccess::condition(ApmAccess::filters($signal), 'access'.$signal);
 	}
 
@@ -911,7 +912,7 @@ class ApmStats {
 	 *
 	 * @return array|null  [time_from, time_till, minute timestamps] or null if the period is too short.
 	 */
-	private static function getSeriesWindow(int $time_from, int $time_till, int $minutes): ?array {
+	protected static function getSeriesWindow(int $time_from, int $time_till, int $minutes): ?array {
 		$series_till = intdiv($time_till, SEC_PER_MIN) * SEC_PER_MIN;
 		$series_from = max($time_from, $series_till - $minutes * SEC_PER_MIN);
 		$first_bucket = intdiv($series_from, SEC_PER_MIN) * SEC_PER_MIN;

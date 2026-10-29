@@ -14,7 +14,7 @@ Monitoreo del rendimiento de aplicaciones (APM) en **Zabbix 8.0** para cualquier
 
 | Componente | Qué aporta |
 |---|---|
-| `modules/ApmOverview` | Página **APM → Overview**: una pestaña por aplicación (`service.namespace`), con Estado, Mapa de servicios, Servicios, Endpoints, Errores, Experiencia del usuario, Origen de la lentitud y **Cómo funciona**: una guía interactiva por lenguaje (Go, Python, Java, Node.js, .NET, PHP, Ruby, Docker Compose, Kubernetes) con comprobaciones en vivo de la aplicación. Actualización en tiempo real. |
+| `modules/ApmOverview` | Página **APM → Overview**: una pestaña por aplicación (`service.namespace`), con Estado, Mapa de servicios, Servicios, Endpoints, Errores, Experiencia del usuario, Origen de la lentitud y **Cómo funciona**: una guía interactiva por lenguaje (Go, Python, Java, Node.js, .NET, PHP, Ruby, Docker Compose, Kubernetes) con comprobaciones en vivo de la aplicación. Página **APM → Real user monitoring**: cargas de página, sesiones con su línea de tiempo hasta los servicios del backend, recursos y Core Web Vitals, desde el SDK web de OpenTelemetry ([docs/rum.es.md](docs/rum.es.md)). Actualización en tiempo real. |
 | `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Widgets de dashboard: mapa de servicios y tabla de salud de servicios, con campo *Aplicación*. |
 | `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: el oficial *Generic OpenTelemetry by OTLP* limitado a una aplicación. Spans por estado, duraciones, % de error, logs por severidad, triggers y dashboard. [Detalles](docs/apm-template.es.md). |
 | `templates/apm_services_clickhouse_http.yaml` | Opcional: items y triggers por servicio, endpoint y conexión (tasa de error, p95, Apdex). |
@@ -107,7 +107,7 @@ Más: [experiencia del usuario](docs/screenshots/user-experience.png), [origen d
 | [add-application.es.md](docs/add-application.es.md) | Cada aplicación: instrumentar, llegar al collector, host en Zabbix, verificar |
 | [apm-template.es.md](docs/apm-template.es.md) | El template APM: items, triggers, macros, ajuste y actualizaciones |
 | [verification.es.md](docs/verification.es.md) | Qué se probó y cómo repetirlo |
-| [rum.md](docs/rum.md) | Web Vitals de navegadores reales (en inglés) |
+| [rum.es.md](docs/rum.es.md) | Monitorización de usuarios reales: páginas, sesiones, recursos y Web Vitals de navegadores reales |
 | [troubleshooting.md](docs/troubleshooting.md) | Problemas frecuentes (en inglés) |
 
 ## Qué responde cada pestaña
@@ -119,7 +119,7 @@ Más: [experiencia del usuario](docs/screenshots/user-experience.png), [origen d
   camino y ver sus cifras, haz clic para ver dónde se va su tiempo.
 - **Servicios / Endpoints**: métricas RED (tasa, errores, duración) con tendencias por minuto.
 - **Errores**: fallos agrupados por servicio, endpoint y mensaje, con veces, primera y última vez y la última traza.
-- **Experiencia del usuario**: Core Web Vitals (ver [docs/rum.md](docs/rum.md)), Apdex por servicio y endpoint, e
+- **Experiencia del usuario**: Core Web Vitals (ver [docs/rum.es.md](docs/rum.es.md)), Apdex por servicio y endpoint, e
   histogramas de latencia.
 - **Origen de la lentitud**: tiempo por endpoint (código propio / base de datos / otros servicios), las peticiones más
   lentas con su cascada de spans, las consultas más costosas y los endpoints más lentos que en el periodo anterior.

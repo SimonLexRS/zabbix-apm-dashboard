@@ -155,7 +155,7 @@ class OverviewLoader {
 	 * One section of a tab with several queries: if its query fails (e.g. ClickHouse out of memory), the section is
 	 * empty and marked in "section_errors", the rest of the tab still shows.
 	 */
-	private static function section(array &$data, string $key, array $empty, callable $query): void {
+	public static function section(array &$data, string $key, array $empty, callable $query): void {
 		try {
 			$data[$key] = $query();
 		}
@@ -168,7 +168,7 @@ class OverviewLoader {
 	/**
 	 * Describe where the frontend takes the APM data source configuration from. Credentials are never exposed.
 	 */
-	private static function getSourceInfo(): array {
+	public static function getSourceInfo(): array {
 		global $TELEMETRY_PROVIDERS;
 
 		if ($TELEMETRY_PROVIDERS) {

@@ -12,7 +12,7 @@ and Docker Compose applications.
 
 | Component | What it gives you |
 |---|---|
-| `modules/ApmOverview` | Page **APM → Overview**: one tab per application (`service.namespace`); Status, Service map, Services, Endpoints, Errors, User experience, Origin of slowness, and **How it works**: an interactive guide per language (Go, Python, Java, Node.js, .NET, PHP, Ruby, Docker Compose, Kubernetes) with live checks of the application. Real-time refresh. |
+| `modules/ApmOverview` | Page **APM → Overview**: one tab per application (`service.namespace`); Status, Service map, Services, Endpoints, Errors, User experience, Origin of slowness, and **How it works**: an interactive guide per language (Go, Python, Java, Node.js, .NET, PHP, Ruby, Docker Compose, Kubernetes) with live checks of the application. Page **APM → Real user monitoring**: page loads, sessions with their timeline down to the backend services, resources and Core Web Vitals, from the OpenTelemetry web SDK ([docs/rum.md](docs/rum.md)). Real-time refresh. |
 | `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Dashboard widgets: service map and service health table, with an *Application* field. |
 | `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: the official *Generic OpenTelemetry by OTLP* limited to one application; spans by status, durations, error %, logs by severity, triggers and a dashboard. [Details](docs/apm-template.md). |
 | `templates/apm_services_clickhouse_http.yaml` | Optional: items and triggers per service, endpoint and connection (error rate, p95, Apdex). |
@@ -103,7 +103,7 @@ More: [user experience](docs/screenshots/user-experience.png), [origin of slowne
 | [add-application.md](docs/add-application.md) | Each application: instrument, reach the collector, Zabbix host, verify |
 | [apm-template.md](docs/apm-template.md) | The APM template: items, triggers, macros, tuning, upgrades |
 | [verification.md](docs/verification.md) | What was tested and how to repeat it |
-| [rum.md](docs/rum.md) | Web Vitals from real browsers |
+| [rum.md](docs/rum.md) | Real user monitoring: pages, sessions, resources and Web Vitals from real browsers |
 | [troubleshooting.md](docs/troubleshooting.md) | Common problems |
 
 ## What each tab answers
