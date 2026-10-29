@@ -16,6 +16,8 @@ application (OTel SDK) ──OTLP──▶ collector ──▶ ClickHouse zabbix
 | Service | `service.name`: one deployable process | `flowspock-api` |
 | Environment (optional) | `deployment.environment.name` | `production` |
 
+The same steps, filled in for your application and with live checks, are in Zabbix: **APM → Overview → How it works**.
+
 Prerequisites (once per Zabbix): [installation.md](installation.md) (ClickHouse, collector, data source, modules,
 template).
 

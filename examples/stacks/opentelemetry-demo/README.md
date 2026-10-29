@@ -57,7 +57,7 @@ between configuration files, and infrastructure metrics (`docker_stats`, `host_m
 The store is on port 8080 (`ENVOY_PORT`); if it is taken on your machine, publish another host port in a further
 override (`ports: !override ["18080:8080"]`).
 
-![OpenTelemetry Demo store](../../../docs/screenshots/otel-demo-store.png)
+![OpenTelemetry Demo service map](../../../docs/screenshots/otel-demo-service-map.png)
 
 ## Same pattern elsewhere
 

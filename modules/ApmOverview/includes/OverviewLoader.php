@@ -2,7 +2,8 @@
 
 namespace Modules\ApmOverview\Includes;
 
-use CRoleHelper,
+use API,
+	CRoleHelper,
 	CSettingsHelper,
 	CWebUser,
 	DBException;
@@ -79,6 +80,20 @@ class OverviewLoader {
 					);
 					break;
 
+				case OverviewHtml::TAB_HOWTO:
+					// "Is it working now": a fixed recent window, whatever the period of the page.
+					$data['application'] = $filter['application'];
+					$data['signals'] = $stats->getSignalStats(time() - OverviewHtml::CHECK_WINDOW, time());
+					$data['services'] = $stats->getServiceNames(SEC_PER_DAY);
+					// Services sending right now without service.namespace: they cannot be told apart by application.
+					$data['unnamespaced'] = $filter['application'] !== null && $filter['application'] !== ''
+						? (new ApmStats())->setApplication('')->getServiceNames(OverviewHtml::CHECK_WINDOW)
+						: [];
+					$data['host'] = $filter['application'] !== null && $filter['application'] !== ''
+						? self::findHost($filter['application'])
+						: null;
+					break;
+
 				case OverviewHtml::TAB_SLOW:
 					self::section($data, 'breakdown', [],
 						fn() => $stats->getTimeBreakdown($time_from, $time_till, $service)
@@ -100,6 +115,37 @@ class OverviewLoader {
 		}
 
 		return $data + ['version' => '', 'signals' => []];
+	}
+
+	/**
+	 * The Zabbix host of an application (apm-<namespace>, see scripts/zabbix-apm-app.py), with the permissions of the
+	 * current user.
+	 *
+	 * @return array|null  ['hostid', 'name', 'template' => bool, 'namespace' => ?string]
+	 */
+	private static function findHost(string $application): ?array {
+		$hosts = API::Host()->get([
+			'output' => ['hostid', 'name'],
+			'filter' => ['host' => Integration::hostName($application)],
+			'selectParentTemplates' => ['host'],
+			'selectMacros' => ['macro', 'value']
+		]);
+
+		if (!$hosts) {
+			return null;
+		}
+
+		$host = $hosts[0];
+		$macro = array_values(array_filter($host['macros'],
+			static fn(array $macro): bool => $macro['macro'] === '{$OTLP.NAMESPACE}'
+		));
+
+		return [
+			'hostid' => $host['hostid'],
+			'name' => $host['name'],
+			'template' => in_array('OpenTelemetry application by OTLP', array_column($host['parentTemplates'], 'host'), true),
+			'namespace' => $macro ? $macro[0]['value'] : null
+		];
 	}
 
 	/**

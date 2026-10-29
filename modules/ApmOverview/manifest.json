@@ -4,7 +4,7 @@
 	"type": "module",
 	"name": "APM Overview",
 	"namespace": "ApmOverview",
-	"version": "1.5.0",
+	"version": "1.6.0",
 	"author": "Simon Alex Rodriguez",
 	"url": "https://github.com/SimonLexRS/zabbix-apm-dashboard",
 	"description": "Real-time APM overview for OpenTelemetry data in ClickHouse: pipeline status, service map, per-service and per-endpoint RED metrics, grouped errors, user experience (Web Vitals, Apdex, latency histograms) and origin of slowness (time breakdown, waterfalls, expensive queries, regressions). English and Spanish.",

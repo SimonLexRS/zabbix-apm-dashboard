@@ -12,6 +12,7 @@ use Modules\ApmOverview\Actions\Overview;
 use Modules\ApmOverview\Includes\{
 	I18n,
 	ApmStats,
+	Integration,
 	OverviewHtml
 };
 
@@ -150,15 +151,110 @@ $ux_tab = $block(OverviewHtml::TAB_UX);
 $slow_tab = $block(OverviewHtml::TAB_SLOW);
 
 /*
- * Tab "How it works": how APM works (static).
+ * Tab "How it works": an interactive guide to connect an application (filled in by CApmOverviewGuide in the browser),
+ * the live checks of the application (refreshable block) and the reference of the data flow and configuration.
  */
+$guide_values = Integration::defaults($data['filter']['application'] ?? '');
+$guide_languages = Integration::languages();
+$guide_first = array_key_first($guide_languages);
+
+// Text with placeholders: rendered with the defaults; the page script fills it in again, as text, from the form.
+$guide_text = static fn(string $text, string $tag): CTag => (new CTag($tag, true, Integration::fill($text, $guide_values)))
+	->setAttribute('data-apm-template', $text);
+
+$guide_form = (new CFormGrid())
+	->addClass(CFormGrid::ZBX_STYLE_FORM_GRID_LABEL_WIDTH_TRUE)
+	->addItem([
+		new CLabel(I18n::t('Application (service.namespace)'), 'apm-guide-namespace'),
+		new CFormField(
+			(new CTextBox('apm_guide_namespace', $guide_values['{namespace}']))
+				->setId('apm-guide-namespace')
+				->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
+				->setAttribute('autocomplete', 'off')
+		)
+	])
+	->addItem([
+		new CLabel(I18n::t('Service (service.name)'), 'apm-guide-service'),
+		new CFormField(
+			(new CTextBox('apm_guide_service', $guide_values['{service}']))
+				->setId('apm-guide-service')
+				->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
+				->setAttribute('autocomplete', 'off')
+		)
+	])
+	->addItem([
+		new CLabel(I18n::t('Collector host'), 'apm-guide-collector'),
+		new CFormField([
+			(new CTextBox('apm_guide_collector', ''))
+				->setId('apm-guide-collector')
+				->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
+				->setAttribute('autocomplete', 'off')
+				->setAttribute('placeholder', Integration::DEFAULT_COLLECTOR),
+			(new CDiv(I18n::t('Host name or address of the OpenTelemetry Collector (or Zabbix proxy) that your applications reach. Remembered in this browser.')))
+				->addClass(ZBX_STYLE_GREY)
+		])
+	]);
+
+$guide_language_list = (new CTag('ul', true))
+	->setId('apm-guide-language')
+	->addClass('radio-list-control');
+
+foreach ($guide_languages as $key => $language) {
+	$radio = (new CInput('radio', 'apm_guide_language', $key))->setId('apm-guide-language-'.$key);
+
+	if ($key === $guide_first) {
+		$radio->setAttribute('checked', 'checked');
+	}
+
+	$guide_language_list->addItem(new CTag('li', true, [$radio, new CLabel($language['label'], 'apm-guide-language-'.$key)]));
+}
+
+$guide_panels = [];
+
+foreach ($guide_languages as $key => $language) {
+	$steps = (new CDiv())->addClass('apm-guide-steps');
+
+	foreach (array_values($language['steps']) as $i => $step) {
+		$items = [new CTag('h5', true, ($i + 1).'. '.$step['title']), $guide_text($step['text'], 'p')];
+
+		if ($step['code'] !== '') {
+			$items[] = (new CDiv([
+				(new CTag('pre', true, $guide_text($step['code'], 'code')))->addClass('apm-overview-code'),
+				(new CButton('apm_guide_copy', I18n::t('Copy')))
+					->addClass(ZBX_STYLE_BTN_ALT)
+					->addClass('apm-guide-copy')
+					->setAttribute('data-copied', I18n::t('Copied'))
+			]))->addClass('apm-guide-code');
+		}
+
+		$steps->addItem((new CDiv($items))->addClass('apm-guide-step'));
+	}
+
+	$panel = (new CDiv($steps))
+		->addClass('apm-guide-panel')
+		->setAttribute('data-language', $key);
+
+	if ($key !== $guide_first) {
+		$panel->setAttribute('hidden', 'hidden');
+	}
+
+	$guide_panels[] = $panel;
+}
+
+$guide = (new CDiv([
+	$hint(I18n::t('Fill in the application, the service and the collector: the steps of the chosen language are ready to copy. The checks below show whether the application is already sending data and has its Zabbix host.')),
+	$guide_form,
+	(new CDiv([new CSpan(I18n::t('Language or environment:')), $guide_language_list]))->addClass('apm-guide-languages'),
+	$guide_panels
+]))->setId('apm-guide');
+
 $flow_steps = [
-	[I18n::t('Application'), I18n::t('Instrumented with an OpenTelemetry SDK or auto-instrumentation (OTEL_* variables).')],
-	[_('OTLP gRPC :4317'), I18n::t('Traces, metrics and logs are sent over OTLP/gRPC, directly or through an OpenTelemetry Collector.')],
-	[I18n::t('Zabbix proxy or OpenTelemetry Collector'), I18n::t('Receives the data: the APM collector of the proxy (StartAPMCollectors=1, packages for Ubuntu 24.04+) or an OpenTelemetry Collector with the clickhouse exporter. The Zabbix server cannot receive telemetry.')],
-	[_('ClickHouse'), I18n::t('Telemetry is stored in the otel_traces, otel_logs and otel_metrics_* tables (TelemetryProvider).')],
-	[I18n::t('Zabbix frontend'), I18n::t('APM → Traces, Metrics, Logs and this overview query ClickHouse directly.')],
-	[I18n::t('Items and triggers'), I18n::t('"Telemetry query" items aggregate telemetry into regular metrics for triggers, graphs and dashboards.')]
+	[I18n::t('Application'), I18n::t('Instrumented with an OpenTelemetry SDK or agent. Every service sends its name (service.name) and its application (service.namespace).')],
+	['OTLP :4317 / :4318', I18n::t('Traces, metrics and logs over OTLP (gRPC or HTTP), directly or through a collector of the application.')],
+	[I18n::t('OpenTelemetry Collector or Zabbix proxy'), I18n::t('Receives OTLP and writes it to ClickHouse: an OpenTelemetry Collector with the clickhouse exporter, or the APM collector of a Zabbix proxy (StartAPMCollectors=1). The Zabbix server does not receive telemetry.')],
+	['ClickHouse', I18n::t('Telemetry is stored in the otel_traces, otel_logs and otel_metrics_* tables (TelemetryProvider).')],
+	[I18n::t('Zabbix frontend'), I18n::t('APM → Traces, Metrics, Logs and this page, one tab per application, query ClickHouse directly.')],
+	[I18n::t('Items and triggers'), I18n::t('Host apm-<application> with the template "OpenTelemetry application by OTLP": Telemetry query items, triggers and a dashboard per application.')]
 ];
 
 $flow = (new CDiv())->addClass('apm-overview-flow');
@@ -178,6 +274,7 @@ foreach ($flow_steps as $i => [$title, $description]) {
 
 $config_table = (new CTableInfo())
 	->setHeader([I18n::t('Where'), I18n::t('Parameter'), I18n::t('Purpose')])
+	->addRow([I18n::t('Application'), 'OTEL_RESOURCE_ATTRIBUTES=service.namespace=…', I18n::t('Required: groups the services of an application (tabs of this page and its Zabbix host).')])
 	->addRow(['otelcol config.yaml', 'receivers: otlp / exporters: clickhouse', I18n::t('OpenTelemetry Collector: receives OTLP on :4317 and writes to ClickHouse (see examples/otelcol-config.yaml).')])
 	->addRow(['zabbix_proxy.conf', 'StartAPMCollectors=1', I18n::t('Starts the APM (OTLP) collector of the proxy. Needs a proxy built with APM.')])
 	->addRow(['zabbix_proxy.conf', 'APMListenIP / APMListenPort=4317', I18n::t('Address and port of the OTLP/gRPC receiver.')])
@@ -187,30 +284,25 @@ $config_table = (new CTableInfo())
 	->addRow(['Frontend', _('Administration → Data source → APM'), I18n::t('ClickHouse used by the APM pages (or $TELEMETRY_PROVIDERS in zabbix.conf.php).')])
 	->addRow(['Frontend', _('Proxy → APM tab'), I18n::t('Enable collection, message limit and additional resource attributes.')]);
 
-$otel_example = (new CPre(implode("\n", [
-	'OTEL_SERVICE_NAME=my-service',
-	'OTEL_EXPORTER_OTLP_ENDPOINT=http://<zabbix-proxy>:4317',
-	'OTEL_EXPORTER_OTLP_PROTOCOL=grpc',
-	'OTEL_EXPORTER_OTLP_INSECURE=true',
-	'opentelemetry-instrument python app.py'
-])))->addClass('apm-overview-code');
-
 $doc_links = new CList();
 
 foreach ([
+	I18n::t('Connect an application, step by step') => OverviewHtml::DOCS_URL.'/blob/main/docs/add-application.md',
+	I18n::t('Examples per language and environment') => OverviewHtml::DOCS_URL.'/tree/main/examples/stacks',
+	I18n::t('The APM template') => OverviewHtml::DOCS_URL.'/blob/main/docs/apm-template.md',
 	I18n::t('APM section') => 'https://www.zabbix.com/documentation/8.0/en/manual/web_interface/frontend_sections/apm',
 	I18n::t('APM parameters of the proxy') => 'https://www.zabbix.com/documentation/8.0/en/manual/concepts/proxy/proxy_params',
 	I18n::t('Telemetry query items') => 'https://www.zabbix.com/documentation/8.0/en/manual/config/items/itemtypes/telemetry_query',
-	_('API: apmtrace.get') => 'https://www.zabbix.com/documentation/8.0/en/manual/api/reference/apmtrace/get',
 	I18n::t('OpenTelemetry instrumentation') => 'https://opentelemetry.io/docs/languages/'
 ] as $label => $url) {
 	$doc_links->addItem((new CLink($label, $url))->setTarget('_blank'));
 }
 
 $howto_tab = [
+	(new CSection($guide))->setHeader(new CTag('h4', true, I18n::t('Connect an application'))),
+	(new CSection($block(OverviewHtml::TAB_HOWTO)))->setHeader(new CTag('h4', true, I18n::t('Is it working?'))),
 	(new CSection($flow))->setHeader(new CTag('h4', true, I18n::t('Data flow'))),
 	(new CSection($config_table))->setHeader(new CTag('h4', true, I18n::t('Configuration'))),
-	(new CSection($otel_example))->setHeader(new CTag('h4', true, I18n::t('Instrument an application'))),
 	(new CSection($doc_links))->setHeader(new CTag('h4', true, I18n::t('Documentation')))
 ];
 
@@ -296,6 +388,10 @@ if ($data['filter']['endpoint_service'] !== '') {
 			{method: "POST", body}
 		);
 	};
+
+	if (typeof CApmOverviewGuide === "function") {
+		new CApmOverviewGuide();
+	}
 
 	if (typeof CApmOverviewLive === "function") {
 		new CApmOverviewLive('.json_encode([

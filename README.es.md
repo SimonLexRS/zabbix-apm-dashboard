@@ -10,11 +10,11 @@ Monitoreo del rendimiento de aplicaciones (APM) en **Zabbix 8.0** para cualquier
 - scripts de alta y de verificación;
 - guías paso a paso para aplicaciones en Go, Java, Python, Node.js, .NET, Kubernetes y Docker Compose.
 
-![APM Overview: mapa de servicios](docs/screenshots/service-map-es.png)
+![OpenTelemetry Demo en APM Overview: mapa de servicios](docs/screenshots/otel-demo-service-map.png)
 
 | Componente | Qué aporta |
 |---|---|
-| `modules/ApmOverview` | Página **APM → Overview**: una pestaña por aplicación (`service.namespace`), con Estado, Mapa de servicios, Servicios, Endpoints, Errores, Experiencia del usuario y Origen de la lentitud. Actualización en tiempo real. |
+| `modules/ApmOverview` | Página **APM → Overview**: una pestaña por aplicación (`service.namespace`), con Estado, Mapa de servicios, Servicios, Endpoints, Errores, Experiencia del usuario, Origen de la lentitud y **Cómo funciona**: una guía interactiva por lenguaje (Go, Python, Java, Node.js, .NET, PHP, Ruby, Docker Compose, Kubernetes) con comprobaciones en vivo de la aplicación. Actualización en tiempo real. |
 | `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Widgets de dashboard: mapa de servicios y tabla de salud de servicios, con campo *Aplicación*. |
 | `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: el oficial *Generic OpenTelemetry by OTLP* limitado a una aplicación. Spans por estado, duraciones, % de error, logs por severidad, triggers y dashboard. [Detalles](docs/apm-template.es.md). |
 | `templates/apm_services_clickhouse_http.yaml` | Opcional: items y triggers por servicio, endpoint y conexión (tasa de error, p95, Apdex). |
@@ -64,9 +64,11 @@ Los valores del template coinciden con ClickHouse para cada aplicación. Método
 
 ## Capturas
 
-| Servicios de una aplicación | La tienda del OpenTelemetry Demo (una de las aplicaciones verificadas) |
+| Cómo funciona: guía por lenguaje, rellenada para la aplicación | Comprobaciones en vivo de la aplicación |
 |---|---|
-| ![Servicios](docs/screenshots/services.png) | ![Tienda](docs/screenshots/otel-demo-store.png) |
+| ![Cómo funciona](docs/screenshots/how-it-works.png) | ![Comprobaciones](docs/screenshots/how-it-works-checks.png) |
+| **Servicios del OpenTelemetry Demo** | **La tienda del OpenTelemetry Demo** |
+| ![Servicios](docs/screenshots/otel-demo-services.png) | ![Tienda](docs/screenshots/otel-demo-store.png) |
 
 Más: [experiencia del usuario](docs/screenshots/user-experience.png), [origen de la lentitud](docs/screenshots/origin-of-slowness-dark.png).
 

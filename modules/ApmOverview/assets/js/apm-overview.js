@@ -42,7 +42,7 @@ class CApmOverviewLive {
 	}
 
 	/**
-	 * The block of the visible tab, or null on the static tab.
+	 * The refreshable block of the visible tab, or null if it has none.
 	 */
 	_activeBlock() {
 		for (const block of document.querySelectorAll('[data-apm-block]')) {
@@ -107,7 +107,7 @@ class CApmOverviewLive {
 
 	/**
 	 * Plan the next refresh of the visible tab. Nothing is planned while paused, while the browser tab is hidden, while
-	 * a request is running or on the static tab.
+	 * a request is running or on a tab without a refreshable block.
 	 */
 	_schedule() {
 		clearTimeout(this._timeout);
@@ -232,5 +232,165 @@ class CApmOverviewLive {
 
 		this._status.textContent = parts.join(' · ');
 		this._status.classList.toggle('apm-overview-live-error', this._error !== null);
+	}
+}
+
+/*
+ * "How it works" guide: the form fills in the steps of the chosen language. Templates live in data-apm-template and
+ * are written back with textContent, so nothing typed in the form is ever interpreted as HTML.
+ */
+class CApmOverviewGuide {
+
+	constructor() {
+		this._root = document.getElementById('apm-guide');
+
+		if (this._root === null) {
+			return;
+		}
+
+		this._storage = {collector: 'apm.guide.collector', language: 'apm.guide.language'};
+		this._namespace = document.getElementById('apm-guide-namespace');
+		this._service = document.getElementById('apm-guide-service');
+		this._collector = document.getElementById('apm-guide-collector');
+		this._default_service = true;
+
+		this._collector.value = this._load(this._storage.collector) ?? '';
+
+		this._namespace.addEventListener('input', () => {
+			// The service follows the application until it is edited.
+			if (this._default_service) {
+				this._service.value = this._namespace.value.trim() !== '' ? this._namespace.value.trim() + '-api' : '';
+			}
+			this._render();
+		});
+		this._service.addEventListener('input', () => {
+			this._default_service = false;
+			this._render();
+		});
+		this._collector.addEventListener('input', () => {
+			this._save(this._storage.collector, this._collector.value.trim());
+			this._render();
+		});
+
+		for (const radio of document.querySelectorAll('input[name="apm_guide_language"]')) {
+			radio.addEventListener('change', () => {
+				if (radio.checked) {
+					this._show(radio.value);
+					this._save(this._storage.language, radio.value);
+				}
+			});
+		}
+
+		this._root.addEventListener('click', (e) => {
+			const button = e.target.closest('.apm-guide-copy');
+
+			if (button !== null) {
+				e.preventDefault();
+				this._copy(button);
+			}
+		});
+
+		const language = this._load(this._storage.language);
+		const radio = language !== null
+			? document.querySelector('input[name="apm_guide_language"][value="' + CSS.escape(language) + '"]')
+			: null;
+
+		if (radio !== null) {
+			radio.checked = true;
+			this._show(radio.value);
+		}
+
+		this._render();
+	}
+
+	_values() {
+		const namespace = this._namespace.value.trim() || 'my-app';
+
+		return {
+			namespace,
+			service: this._service.value.trim() || namespace + '-api',
+			collector: this._collector.value.trim() || this._collector.placeholder,
+			// Same rule as Integration::hostName() and scripts/zabbix-apm-app.py: other characters become "-".
+			zabbix_host: 'apm-' + namespace.replace(/[^0-9A-Za-z._ -]/g, '-'),
+			// This frontend: the part of the address before zabbix.php.
+			zabbix_url: location.origin + location.pathname.replace(/\/[^/]*$/, '')
+		};
+	}
+
+	_render() {
+		const values = this._values();
+
+		for (const el of this._root.querySelectorAll('[data-apm-template]')) {
+			// Replaces {namespace}, {service}, {collector}, {zabbix_host} and {zabbix_url}; other braces stay as they are.
+			el.textContent = el.dataset.apmTemplate.replace(/\{(namespace|service|collector|zabbix_host|zabbix_url)\}/g,
+				(match, key) => values[key]
+			);
+		}
+	}
+
+	_show(language) {
+		for (const panel of this._root.querySelectorAll('.apm-guide-panel')) {
+			panel.hidden = panel.dataset.language !== language;
+		}
+	}
+
+	_copy(button) {
+		const text = button.parentElement.querySelector('code').textContent;
+		const done = () => {
+			const label = button.textContent;
+
+			button.textContent = button.dataset.copied;
+			setTimeout(() => button.textContent = label, 1500);
+		};
+
+		// The clipboard API needs a secure context (https); Zabbix is often served over http.
+		if (navigator.clipboard && window.isSecureContext) {
+			navigator.clipboard.writeText(text).then(done, () => this._copyFallback(text) && done());
+		}
+		else if (this._copyFallback(text)) {
+			done();
+		}
+	}
+
+	_copyFallback(text) {
+		const area = document.createElement('textarea');
+
+		area.value = text;
+		area.setAttribute('readonly', '');
+		area.style.position = 'fixed';
+		area.style.opacity = '0';
+		document.body.appendChild(area);
+		area.select();
+
+		let copied = false;
+
+		try {
+			copied = document.execCommand('copy');
+		}
+		catch (e) {
+			// Not allowed: the text stays selectable in the block.
+		}
+
+		area.remove();
+
+		return copied;
+	}
+
+	_load(key) {
+		try {
+			return localStorage.getItem(key);
+		}
+		catch (e) {
+			return null;
+		}
+	}
+
+	_save(key, value) {
+		try {
+			localStorage.setItem(key, value);
+		}
+		catch (e) {
+			// Not persisted (privacy mode).
+		}
 	}
 }

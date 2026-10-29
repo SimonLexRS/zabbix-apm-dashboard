@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0
+
+- APM Overview, **How it works** is now an interactive guide to connect an application: fill in the application
+  (`service.namespace`), the service and the collector, pick the language or environment (Go, Python, Java, Node.js,
+  .NET, PHP, Ruby, Docker Compose, Kubernetes, or a test without code with telemetrygen) and copy each step, already
+  filled in. Below it, live checks of the selected application: traces, logs and metrics received in the last 15
+  minutes, its services, services sent without `service.namespace`, and its Zabbix host with the template and macro.
+- The data flow and configuration reference of that tab cover both paths (OpenTelemetry Collector or Zabbix proxy).
+
 ## 1.5.0
 
 - New template **OpenTelemetry application by OTLP** (`templates/otel_application_otlp.json`): Zabbix's official

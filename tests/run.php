@@ -15,6 +15,7 @@ namespace {
 	require $root.'/ApmOverview/includes/I18n.php';
 	require $root.'/ApmOverview/includes/ApmStats.php';
 	require $root.'/ApmOverview/includes/ServiceMap.php';
+	require $root.'/ApmOverview/includes/Integration.php';
 
 	$failures = 0;
 
@@ -41,6 +42,30 @@ namespace Modules\ApmOverview\Includes {
 	check('app gone falls back to first', ApmStats::resolveApplication(['apm-demo', 'flowspock'], 'old'), 'apm-demo');
 	check('app no namespace', ApmStats::resolveApplication(['', 'flowspock'], ''), '');
 	check('app none', ApmStats::resolveApplication([], 'flowspock'), null);
+
+	// Integration guide: the agreed languages, four steps each, only known placeholders, host name as the scripts.
+	I18n::setLanguage('en');
+	$languages = Integration::languages();
+	check('guide languages', array_keys($languages),
+		['go', 'python', 'java', 'nodejs', 'dotnet', 'php', 'ruby', 'compose', 'kubernetes', 'test']
+	);
+
+	foreach ($languages as $key => $language) {
+		check("guide $key has 4 steps", count($language['steps']), 4);
+
+		foreach ($language['steps'] as $i => $step) {
+			check("guide $key step $i has title and text", $step['title'] !== '' && $step['text'] !== '', true);
+
+			preg_match_all('/\{[a-z_]+\}/', $step['text'].$step['code'], $m);
+			check("guide $key step $i placeholders", array_values(array_diff($m[0], Integration::PLACEHOLDERS)), []);
+		}
+	}
+
+	check('guide host name', Integration::hostName('my shop/v2'), 'apm-my shop-v2');
+	check('guide defaults', Integration::fill('{service} → {zabbix_host}', Integration::defaults('shop')),
+		'shop-api → apm-shop'
+	);
+	check('guide defaults without application', Integration::defaults('')['{namespace}'], 'my-app');
 
 	check('matches substring', ServiceMap::matches('flowspock-api', 'spock'), true);
 	check('matches wildcard', ServiceMap::matches('demo-backend', 'demo-*'), true);

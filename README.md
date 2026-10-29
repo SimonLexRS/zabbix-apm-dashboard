@@ -8,11 +8,11 @@ per application), a template derived from Zabbix's official OpenTelemetry templa
 triggers), onboarding and verification scripts, and step-by-step guides for Go, Java, Python, Node.js, .NET, Kubernetes
 and Docker Compose applications.
 
-![APM Overview: service map](docs/screenshots/service-map.png)
+![OpenTelemetry Demo in APM Overview: service map](docs/screenshots/otel-demo-service-map.png)
 
 | Component | What it gives you |
 |---|---|
-| `modules/ApmOverview` | Page **APM → Overview**: one tab per application (`service.namespace`); Status, Service map, Services, Endpoints, Errors, User experience, Origin of slowness. Real-time refresh. |
+| `modules/ApmOverview` | Page **APM → Overview**: one tab per application (`service.namespace`); Status, Service map, Services, Endpoints, Errors, User experience, Origin of slowness, and **How it works**: an interactive guide per language (Go, Python, Java, Node.js, .NET, PHP, Ruby, Docker Compose, Kubernetes) with live checks of the application. Real-time refresh. |
 | `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Dashboard widgets: service map and service health table, with an *Application* field. |
 | `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: the official *Generic OpenTelemetry by OTLP* limited to one application; spans by status, durations, error %, logs by severity, triggers and a dashboard. [Details](docs/apm-template.md). |
 | `templates/apm_services_clickhouse_http.yaml` | Optional: items and triggers per service, endpoint and connection (error rate, p95, Apdex). |
@@ -60,9 +60,11 @@ match ClickHouse per application. Method, results and how to repeat it: [docs/ve
 
 ## Screenshots
 
-| Services of an application | The OpenTelemetry Demo store (one of the verified applications) |
+| How it works: guide per language, filled in for the application | Live checks of the application |
 |---|---|
-| ![Services](docs/screenshots/services.png) | ![Store](docs/screenshots/otel-demo-store.png) |
+| ![How it works](docs/screenshots/how-it-works.png) | ![Checks](docs/screenshots/how-it-works-checks.png) |
+| **Services of the OpenTelemetry Demo** | **The OpenTelemetry Demo store** |
+| ![Services](docs/screenshots/otel-demo-services.png) | ![Store](docs/screenshots/otel-demo-store.png) |
 
 More: [user experience](docs/screenshots/user-experience.png), [origin of slowness](docs/screenshots/origin-of-slowness-dark.png).
 

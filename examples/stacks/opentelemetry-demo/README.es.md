@@ -60,7 +60,7 @@ configuración, el collector reemplaza (no combina) las listas de exportadores, 
 La tienda escucha en el puerto 8080 (`ENVOY_PORT`). Si está ocupado en tu máquina, publica otro puerto del host en un
 override adicional (`ports: !override ["18080:8080"]`).
 
-![Tienda del OpenTelemetry Demo](../../../docs/screenshots/otel-demo-store.png)
+![Mapa de servicios del OpenTelemetry Demo](../../../docs/screenshots/otel-demo-service-map.png)
 
 ## El mismo patrón en otros sitios
 

@@ -36,10 +36,13 @@ class OverviewHtml {
 		self::TAB_UX, self::TAB_SLOW, self::TAB_HOWTO
 	];
 
-	// Tabs with a refreshable block (the "How it works" tab is static).
+	// Tabs with a refreshable block (in "How it works" only the checks of the application refresh, not the guide).
 	public const DATA_TABS = [self::TAB_STATUS, self::TAB_MAP, self::TAB_SERVICES, self::TAB_ENDPOINTS,
-		self::TAB_ERRORS, self::TAB_UX, self::TAB_SLOW
+		self::TAB_ERRORS, self::TAB_UX, self::TAB_SLOW, self::TAB_HOWTO
 	];
+
+	// Window of the "is it working" checks of the How it works tab.
+	public const CHECK_WINDOW = 15 * SEC_PER_MIN;
 
 	private const ERROR_RATE_WARNING = 1;
 	private const ERROR_RATE_HIGH = 5;
@@ -82,8 +85,113 @@ class OverviewHtml {
 			self::TAB_ERRORS => self::errors($data, $ctx),
 			self::TAB_UX => self::userExperience($data, $ctx),
 			self::TAB_SLOW => self::slowness($data, $ctx),
+			self::TAB_HOWTO => self::howto($data, $ctx),
 			default => new CDiv()
 		};
+	}
+
+	/**
+	 * "Is it working?" checks of the application of the page: signals received, services, services without a
+	 * namespace and its Zabbix host.
+	 *
+	 * @param array $data  ['application' => ?string, 'signals', 'services' => string[], 'unnamespaced' => string[],
+	 *                     'host' => ?array]
+	 */
+	public static function howto(array $data, array $ctx): CDiv {
+		$ok = static fn(string $text): CSpan => (new CSpan($text))->addClass(ZBX_STYLE_STATUS_GREEN);
+		$bad = static fn(string $text): CSpan => (new CSpan($text))->addClass(ZBX_STYLE_STATUS_RED);
+		$warn = static fn(string $text): CSpan => (new CSpan($text))->addClass(ZBX_STYLE_STATUS_YELLOW);
+
+		$application = $data['application'];
+		$table = (new CTableInfo())->setHeader([I18n::t('Check'), I18n::t('State'), I18n::t('Detail')]);
+
+		if ($application === null) {
+			$table->addRow([I18n::t('Application'), $bad(I18n::t('None')),
+				I18n::t('No telemetry with service.namespace in the last 7 days: follow the steps above.')
+			]);
+
+			return (new CDiv($table))->addClass('apm-guide-checks');
+		}
+
+		$signal_names = ['traces' => I18n::t('Traces'), 'logs' => 'Logs', 'metrics' => I18n::t('Metrics')];
+
+		foreach ($signal_names as $signal => $name) {
+			$stats = $data['signals'][$signal] ?? null;
+
+			if ($stats === null || $stats['error'] !== null) {
+				$state = $bad('Error');
+				$detail = $stats['error'] ?? '';
+			}
+			elseif ($stats['rows'] > 0) {
+				$state = $ok(I18n::t('Receiving'));
+				$detail = sprintf(I18n::t('%s records in the last %d minutes, last at %s'), self::formatCount($stats['rows']),
+					self::CHECK_WINDOW / SEC_PER_MIN, zbx_date2str(DATE_TIME_FORMAT_SECONDS, $stats['last'])
+				);
+			}
+			else {
+				$state = $signal === 'traces' ? $bad(I18n::t('No data')) : $warn(I18n::t('No data'));
+				$detail = $signal === 'traces'
+					? I18n::t('Nothing in the last 15 minutes: check the endpoint, the port and the network (step 1).')
+					: I18n::t('Optional, but expected from most SDKs and agents.');
+			}
+
+			$table->addRow([$name, $state, $detail]);
+		}
+
+		$table->addRow([I18n::t('Services'),
+			$data['services'] ? $ok((string) count($data['services'])) : $bad('0'),
+			$data['services'] ? implode(', ', $data['services']) : I18n::t('No service of this application in the last 24 hours.')
+		]);
+
+		if ($data['unnamespaced']) {
+			$table->addRow([I18n::t('Without application'), $warn((string) count($data['unnamespaced'])),
+				sprintf(I18n::t('Services sending without service.namespace in the last 15 minutes (of any application): %s. If one belongs to this application, add the attribute (step 1).'),
+					implode(', ', $data['unnamespaced'])
+				)
+			]);
+		}
+
+		$host_name = Integration::hostName($application);
+		$host = $data['host'];
+
+		if ($application === '') {
+			$table->addRow([I18n::t('Zabbix host'), $warn('—'),
+				I18n::t('These services have no application, so they have no Zabbix host: add service.namespace to them (step 1).')
+			]);
+		}
+		elseif ($host === null) {
+			$table->addRow([I18n::t('Zabbix host'), $bad(I18n::t('Not found')),
+				sprintf(I18n::t('No host %s (or no permission to see it): create it with step 3.'), $host_name)
+			]);
+		}
+		else {
+			$problems = [];
+
+			if (!$host['template']) {
+				$problems[] = I18n::t('the template "OpenTelemetry application by OTLP" is not linked');
+			}
+
+			if ($host['namespace'] !== $application) {
+				$problems[] = sprintf(I18n::t('{$OTLP.NAMESPACE} is "%s"'), (string) $host['namespace']);
+			}
+
+			$link = new CLink($host['name'], (new CUrl('zabbix.php'))
+				->setArgument('action', 'latest.view')
+				->setArgument('hostids', [$host['hostid']])
+				->setArgument('filter_set', 1)
+			);
+
+			$table->addRow([I18n::t('Zabbix host'),
+				$problems ? $warn(I18n::t('Check')) : $ok(I18n::t('OK')),
+				$problems ? [$link, ': '.implode('; ', $problems).'.'] : [$link, ' — '.I18n::t('template linked, macro set.')]
+			]);
+		}
+
+		return (new CDiv([
+			(new CDiv(sprintf(I18n::t('Application %s — updated with the page.'), $application)))
+				->addClass(ZBX_STYLE_GREY),
+			$table
+		]))->addClass('apm-guide-checks');
 	}
 
 	/**

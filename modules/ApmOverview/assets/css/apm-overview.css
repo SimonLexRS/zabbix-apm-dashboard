@@ -659,3 +659,56 @@ span.apm-ux-bad:not(.apm-ux-badge) {
 	padding: 6px 10px 8px;
 	color: #768d99;
 }
+
+/* "How it works" guide */
+#apm-guide .form-grid {
+	margin-bottom: 12px;
+}
+
+.apm-guide-languages {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+
+.apm-guide-languages .radio-list-control {
+	flex-wrap: wrap;
+	margin: 0;
+}
+
+.apm-guide-step {
+	margin-bottom: 14px;
+}
+
+.apm-guide-steps h5 {
+	margin: 0 0 4px;
+	font-size: 1em;
+	font-weight: bold;
+}
+
+.apm-guide-steps p {
+	margin: 0 0 6px;
+	line-height: 1.4;
+}
+
+.apm-guide-code {
+	position: relative;
+}
+
+.apm-guide-code .apm-overview-code {
+	margin: 0;
+	padding-right: 90px;
+	white-space: pre;
+}
+
+.apm-guide-copy {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+}
+
+.apm-guide-checks .list-table {
+	margin-top: 6px;
+}
