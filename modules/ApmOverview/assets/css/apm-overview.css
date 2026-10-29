@@ -1,0 +1,627 @@
+/* The section headers of Zabbix are 32 px high with hidden overflow: their h4 keeps the theme's own spacing. */
+.apm-overview .section {
+	margin-bottom: 16px;
+}
+
+.apm-overview-hint {
+	margin-bottom: 8px;
+	line-height: 1.4;
+}
+
+.apm-overview-section-error {
+	margin: 4px 0 8px;
+	padding: 6px 10px;
+	border-left: 3px solid #e45959;
+	background-color: rgba(228, 89, 89, 0.1);
+	line-height: 1.4;
+}
+
+.apm-overview-loading {
+	padding: 24px 0;
+	color: #768d99;
+}
+
+.apm-overview-service-filter {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 10px;
+	padding: 8px 12px;
+	border: 1px solid rgba(255, 182, 37, 0.7);
+	border-radius: 2px;
+	background-color: rgba(255, 182, 37, 0.12);
+	line-height: 1.4;
+}
+
+.apm-overview-service-filter .btn-alt {
+	flex: none;
+}
+
+.apm-overview-subtitle {
+	margin: 14px 0 6px;
+	font-weight: bold;
+}
+
+.apm-overview-signals,
+.apm-overview-flow {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: stretch;
+}
+
+.apm-overview-signal,
+.apm-overview-flow-step {
+	flex: 1 1 200px;
+	padding: 10px 12px;
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	border-radius: 2px;
+	line-height: 1.4;
+}
+
+.apm-overview-signal-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	font-weight: bold;
+}
+
+.apm-overview-signal-value {
+	font-size: 24px;
+	margin: 8px 0 4px;
+}
+
+.apm-overview-flow-step {
+	flex: 1 1 140px;
+	max-width: 220px;
+}
+
+.apm-overview-flow-title {
+	font-weight: bold;
+	margin-bottom: 6px;
+}
+
+.apm-overview-flow-arrow {
+	align-self: center;
+	font-size: 18px;
+	opacity: 0.6;
+}
+
+.apm-overview-code {
+	padding: 10px;
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	white-space: pre;
+	overflow-x: auto;
+}
+
+/* Real-time control */
+.apm-overview-live {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	white-space: nowrap;
+}
+
+.apm-overview-live .radio-list-control {
+	margin: 0;
+}
+
+#apm-live-status {
+	min-width: 170px;
+}
+
+.apm-overview-live-error {
+	color: #e45959;
+}
+
+/* Tables */
+.apm-overview-endpoint-filter {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	margin-bottom: 8px;
+}
+
+.apm-overview-message {
+	max-width: 480px;
+	word-break: break-word;
+}
+
+.apm-overview-count {
+	font-weight: bold;
+}
+
+.apm-overview-traceid {
+	font-family: monospace;
+	font-size: 12px;
+}
+
+.apm-pill {
+	display: inline-block;
+	padding: 1px 6px;
+	border-radius: 9px;
+	white-space: nowrap;
+}
+
+.apm-pill-good {
+	background-color: rgba(89, 219, 143, 0.22);
+}
+
+.apm-pill-warn {
+	background-color: rgba(255, 182, 37, 0.3);
+}
+
+.apm-pill-bad {
+	background-color: rgba(228, 89, 89, 0.3);
+}
+
+/* Sparklines */
+.apm-spark {
+	display: block;
+	flex: none;
+	overflow: visible;
+}
+
+.apm-spark polyline {
+	fill: none;
+	stroke: #3b82f6;
+	stroke-width: 1.5;
+	stroke-linejoin: round;
+	vector-effect: non-scaling-stroke;
+}
+
+.apm-spark-errors polyline {
+	stroke: #e45959;
+}
+
+.apm-spark-p95 polyline {
+	stroke: #e0a800;
+}
+
+/* Service map */
+.apm-map-canvas {
+	overflow-x: auto;
+}
+
+.apm-map-svg {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	margin: 0 auto;
+	font-size: 12px;
+}
+
+.apm-map-svg text {
+	fill: currentColor;
+}
+
+.apm-map-svg a {
+	color: inherit;
+	cursor: pointer;
+}
+
+.apm-map-edge path {
+	fill: none;
+	stroke: #8a99a6;
+	opacity: 0.75;
+}
+
+.apm-map-edge.apm-map-warn path {
+	stroke: #ffb625;
+}
+
+.apm-map-edge.apm-map-bad path {
+	stroke: #e45959;
+}
+
+.apm-map-svg a:hover .apm-map-edge path,
+.apm-map-svg a:focus .apm-map-edge path {
+	opacity: 1;
+}
+
+#apm-map-arrow path {
+	fill: #8a99a6;
+}
+
+.apm-map-edge-label {
+	font-size: 11px;
+	paint-order: stroke;
+	stroke: #ffffff;
+	stroke-width: 4px;
+	stroke-linejoin: round;
+	pointer-events: none;
+}
+
+html[color-scheme="dark"] .apm-map-edge-label {
+	stroke: #2b2b2b;
+}
+
+.apm-map-node rect {
+	fill: rgba(128, 128, 128, 0.08);
+	stroke: #59db8f;
+	stroke-width: 2;
+}
+
+.apm-map-node.apm-map-warn rect {
+	stroke: #ffb625;
+	fill: rgba(255, 182, 37, 0.1);
+}
+
+.apm-map-node.apm-map-bad rect {
+	stroke: #e45959;
+	fill: rgba(228, 89, 89, 0.12);
+}
+
+.apm-map-node.apm-map-neutral rect {
+	stroke: #3b82f6;
+}
+
+.apm-map-kind-database rect,
+.apm-map-kind-external rect {
+	stroke-dasharray: 5 3;
+}
+
+.apm-map-svg a:hover .apm-map-node rect,
+.apm-map-svg a:focus .apm-map-node rect {
+	stroke-width: 3;
+}
+
+.apm-map-svg .apm-map-dim {
+	opacity: 0.45;
+}
+
+.apm-map-node.apm-map-focus rect {
+	stroke-width: 4;
+}
+
+.apm-map-node-kind {
+	font-size: 9px;
+	letter-spacing: 0.06em;
+	opacity: 0.65;
+}
+
+.apm-map-node-name {
+	font-size: 13px;
+	font-weight: bold;
+}
+
+.apm-map-node-stats {
+	font-size: 11px;
+	opacity: 0.85;
+}
+
+.apm-map-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 18px;
+	margin-top: 10px;
+	line-height: 1.4;
+	color: #768d99;
+}
+
+.apm-map-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	margin-right: 5px;
+	border-radius: 50%;
+	vertical-align: -1px;
+}
+
+.apm-map-dot.apm-map-ok,
+.apm-hist-bar.apm-map-ok {
+	background-color: #59db8f;
+}
+
+.apm-map-dot.apm-map-warn,
+.apm-hist-bar.apm-map-warn {
+	background-color: #ffb625;
+}
+
+.apm-map-dot.apm-map-bad,
+.apm-hist-bar.apm-map-bad {
+	background-color: #e45959;
+}
+
+.apm-map-empty {
+	padding: 24px 0;
+	color: #768d99;
+}
+
+/* User experience */
+.apm-ux-cards {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-bottom: 14px;
+}
+
+.apm-ux-card {
+	flex: 1 1 180px;
+	padding: 10px 12px;
+	border: 1px solid rgba(128, 128, 128, 0.35);
+	border-radius: 2px;
+	line-height: 1.5;
+}
+
+.apm-ux-card-title {
+	font-weight: bold;
+}
+
+.apm-ux-card-value {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 6px 0 2px;
+	font-size: 22px;
+}
+
+.apm-ux-card .apm-spark {
+	margin-top: 6px;
+}
+
+.apm-ux-badge {
+	padding: 1px 6px;
+	border-radius: 9px;
+	font-size: 11px;
+}
+
+.apm-ux-good.apm-ux-badge {
+	background-color: rgba(89, 219, 143, 0.22);
+}
+
+.apm-ux-warn.apm-ux-badge {
+	background-color: rgba(255, 182, 37, 0.3);
+}
+
+.apm-ux-bad.apm-ux-badge {
+	background-color: rgba(228, 89, 89, 0.3);
+}
+
+span.apm-ux-good:not(.apm-ux-badge) {
+	color: #2e9e5b;
+}
+
+span.apm-ux-warn:not(.apm-ux-badge) {
+	color: #d4920b;
+}
+
+span.apm-ux-bad:not(.apm-ux-badge) {
+	color: #e45959;
+}
+
+.apm-ux-tables {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+	align-items: flex-start;
+}
+
+.apm-ux-pages {
+	flex: 3 1 560px;
+}
+
+.apm-ux-devices {
+	flex: 1 1 320px;
+}
+
+.apm-ux-histograms {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+}
+
+.apm-hist {
+	flex: 1 1 420px;
+}
+
+.apm-hist-title {
+	margin-bottom: 6px;
+}
+
+.apm-hist-bars {
+	display: flex;
+	align-items: flex-end;
+	gap: 3px;
+}
+
+.apm-hist-col {
+	flex: 1 1 0;
+	min-width: 0;
+	text-align: center;
+}
+
+.apm-hist-mark {
+	height: 14px;
+	font-size: 10px;
+	font-weight: bold;
+	color: #3b82f6;
+}
+
+.apm-hist-track {
+	display: flex;
+	align-items: flex-end;
+	height: 110px;
+	background-color: rgba(128, 128, 128, 0.06);
+}
+
+/* p50/p95 bucket: a thin line behind the bar, not a box that reads as another bar. */
+.apm-hist-marked .apm-hist-track {
+	background-image: linear-gradient(#3b82f6, #3b82f6);
+	background-size: 2px 100%;
+	background-position: center;
+	background-repeat: no-repeat;
+}
+
+.apm-hist-bar {
+	width: 100%;
+}
+
+.apm-hist-label {
+	margin-top: 3px;
+	font-size: 10px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: #768d99;
+}
+
+/* Origin of slowness */
+.apm-slow-legend {
+	display: flex;
+	gap: 16px;
+	margin-bottom: 8px;
+}
+
+.apm-slow-key::before {
+	content: "";
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	margin-right: 5px;
+	vertical-align: -1px;
+}
+
+.apm-slow-key.apm-slow-own::before,
+.apm-slow-bar .apm-slow-own,
+.apm-wf-span[class*="apm-wf-svc"] {
+	background-color: #3b82f6;
+}
+
+.apm-slow-key.apm-slow-db::before,
+.apm-slow-bar .apm-slow-db,
+.apm-wf-span.apm-wf-db {
+	background-color: #a855f7;
+}
+
+.apm-slow-key.apm-slow-calls::before,
+.apm-slow-bar .apm-slow-calls,
+.apm-wf-span.apm-wf-calls {
+	background-color: #f59e0b;
+}
+
+.apm-slow-bar-cell {
+	width: 40%;
+	min-width: 220px;
+}
+
+.apm-slow-bar {
+	display: flex;
+	height: 16px;
+	overflow: hidden;
+	border-radius: 2px;
+	background-color: rgba(128, 128, 128, 0.15);
+}
+
+.apm-slow-bar > div {
+	height: 100%;
+	color: #ffffff;
+	font-size: 10px;
+	line-height: 16px;
+	text-align: center;
+	overflow: hidden;
+}
+
+.apm-slow-statement {
+	max-width: 520px;
+	font-family: monospace;
+	font-size: 12px;
+	word-break: break-word;
+}
+
+.apm-slow-share {
+	width: 80px;
+	height: 8px;
+	background-color: rgba(128, 128, 128, 0.15);
+}
+
+.apm-slow-share > div {
+	height: 100%;
+	background-color: #a855f7;
+}
+
+/* Waterfall */
+.apm-wf-trace {
+	margin-bottom: 6px;
+	border: 1px solid rgba(128, 128, 128, 0.3);
+	border-radius: 2px;
+}
+
+.apm-wf-trace summary {
+	padding: 7px 10px;
+	cursor: pointer;
+	line-height: 1.4;
+}
+
+.apm-wf-total {
+	display: inline-block;
+	min-width: 70px;
+	font-weight: bold;
+}
+
+.apm-wf-meta {
+	margin-left: 10px;
+}
+
+.apm-wf {
+	padding: 4px 10px 0;
+}
+
+.apm-wf-row {
+	display: grid;
+	grid-template-columns: minmax(180px, 32%) 1fr 72px;
+	gap: 8px;
+	align-items: center;
+	min-height: 20px;
+}
+
+.apm-wf-row:hover {
+	background-color: rgba(128, 128, 128, 0.08);
+}
+
+.apm-wf-name {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.apm-wf-service {
+	color: #768d99;
+	font-size: 11px;
+}
+
+.apm-wf-track {
+	position: relative;
+	height: 12px;
+	background-color: rgba(128, 128, 128, 0.08);
+}
+
+.apm-wf-span {
+	position: absolute;
+	top: 0;
+	height: 100%;
+	min-width: 2px;
+	border-radius: 1px;
+}
+
+.apm-wf-svc1 { background-color: #10b981 !important; }
+.apm-wf-svc2 { background-color: #06b6d4 !important; }
+.apm-wf-svc3 { background-color: #6366f1 !important; }
+.apm-wf-svc4 { background-color: #84cc16 !important; }
+.apm-wf-svc5 { background-color: #ec4899 !important; }
+
+.apm-wf-error {
+	box-shadow: 0 0 0 2px #e45959;
+}
+
+.apm-wf-duration {
+	text-align: right;
+	white-space: nowrap;
+	font-size: 11px;
+}
+
+.apm-wf-footer {
+	padding: 6px 10px 8px;
+	color: #768d99;
+}

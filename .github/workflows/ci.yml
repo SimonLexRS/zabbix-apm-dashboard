@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: PHP syntax
+        run: find modules tests -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Tests
+        run: php tests/run.php
+
+      - name: JavaScript syntax
+        run: |
+          for f in $(find modules -name '*.js'); do node --check "$f"; done
+          cp examples/web-vitals.js /tmp/web-vitals.mjs && node --check /tmp/web-vitals.mjs
+
+      - name: Manifests and template
+        run: |
+          for f in modules/*/manifest.json; do python3 -m json.tool "$f" > /dev/null; done
+          python3 -c "import yaml, sys; yaml.safe_load(open('templates/apm_services_clickhouse_http.yaml')); yaml.safe_load(open('examples/otelcol-config.yaml'))"
+
+      - name: Install script
+        run: |
+          sh -n scripts/install.sh
+          mkdir -p /tmp/zbx/ui/include /tmp/zbx/ui/modules
+          touch /tmp/zbx/ui/zabbix.php
+          echo "define('ZABBIX_VERSION', '8.0.0');" > /tmp/zbx/ui/include/defines.inc.php
+          sudo env ZABBIX_UI=/tmp/zbx/ui sh scripts/install.sh
+          test -f /tmp/zbx/ui/modules/ApmOverview/manifest.json
+          test -f /tmp/zbx/ui/modules/ApmServiceMap/manifest.json
+          sudo env ZABBIX_UI=/tmp/zbx/ui sh scripts/install.sh --uninstall
+          test ! -e /tmp/zbx/ui/modules/ApmOverview

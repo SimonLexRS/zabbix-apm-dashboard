@@ -1,0 +1,20 @@
+# Changelog
+
+## 1.3.0
+
+First public release.
+
+- **APM Overview**
+  - Tabs: Status, Service map, Services, Endpoints, Errors, User experience, Origin of slowness, How it works.
+  - Only the visible tab is queried, on display and every 10 s / 30 s (or paused).
+  - If one query of a tab fails, only its section says so.
+  - Service filter by substring, wildcard (`demo-*`) or exact name (`=api`), with suggestions of the services seen in
+    the last 24 h. On the map the filter highlights instead of hiding.
+  - English and Spanish, following the language of the Zabbix user.
+- **APM service map** widget: the service map of APM Overview on dashboards.
+- **APM service health** widget: the service name opens the service in APM Overview (traces stay one click away); English and Spanish.
+- **Template "APM services by ClickHouse HTTP v2" 2.1**:
+  - databases detected by `db.system.name` or `db.system`;
+  - error, p95 and Apdex triggers need `{$APM.MIN.REQUESTS}`;
+  - `{$APM.SERVICE.MATCHES}` / `{$APM.SERVICE.NOT_MATCHES}` filter what is discovered.
+- Install script, examples (collector, ClickHouse users, low-memory ClickHouse, Web Vitals), tests and CI.

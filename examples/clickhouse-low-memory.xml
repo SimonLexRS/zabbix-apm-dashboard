@@ -1,0 +1,18 @@
+<!--
+  ClickHouse on a small VM (a few GB of RAM, next to Zabbix): copy to /etc/clickhouse-server/config.d/ and restart.
+
+  ClickHouse keeps internal logs (metric_log, trace_log, ...) whose background merges can use up the memory limit; then
+  APM queries and even the collector's inserts fail with MEMORY_LIMIT_EXCEEDED. See docs/troubleshooting.md.
+-->
+<clickhouse>
+	<max_server_memory_usage_to_ram_ratio>0.6</max_server_memory_usage_to_ram_ratio>
+	<mark_cache_size>268435456</mark_cache_size>
+	<uncompressed_cache_size>0</uncompressed_cache_size>
+
+	<metric_log remove="1"/>
+	<trace_log remove="1"/>
+	<text_log remove="1"/>
+	<asynchronous_metric_log remove="1"/>
+	<processors_profile_log remove="1"/>
+	<part_log remove="1"/>
+</clickhouse>

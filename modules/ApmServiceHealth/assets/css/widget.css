@@ -1,0 +1,19 @@
+.apm-service-health td:not(:first-child),
+.apm-service-health th:not(:first-child) {
+	text-align: right;
+	white-space: nowrap;
+}
+
+.apm-service-health .apm-shw-spark {
+	display: inline-block;
+	vertical-align: middle;
+	overflow: visible;
+}
+
+.apm-service-health .apm-shw-spark polyline {
+	fill: none;
+	stroke: #3b82f6;
+	stroke-width: 1.5;
+	stroke-linejoin: round;
+	vector-effect: non-scaling-stroke;
+}
