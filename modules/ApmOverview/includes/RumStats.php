@@ -18,7 +18,8 @@ class RumStats extends ApmStats {
 	private const USER = 'SpanAttributes[\'enduser.id\']';
 	private const URL = 'SpanAttributes[\'url.full\']';
 	private const IS_VIEW = 'SpanName=\'documentLoad\'';
-	private const IS_ACTION = 'SpanAttributes[\'event_type\']!=\'\'';
+	// One action per user event: the instrumentation adds a span per event listener, nested under the first one.
+	private const IS_ACTION = 'SpanAttributes[\'event_type\']!=\'\' AND ParentSpanId=\'\'';
 	private const IS_REQUEST = 'SpanKind=\'Client\'';
 	private const USER_AGENT = 'if(ResourceAttributes[\'user_agent.original\']!=\'\','.
 		'ResourceAttributes[\'user_agent.original\'],SpanAttributes[\'user_agent.original\'])';
@@ -70,6 +71,7 @@ class RumStats extends ApmStats {
 				' countIf('.self::IS_ACTION.') AS actions,'.
 				' countIf('.self::IS_REQUEST.') AS requests,'.
 				' countIf('.self::IS_REQUEST.' AND '.self::failed().') AS failed,'.
+				' countIf('.self::IS_REQUEST.' AND '.self::clientError().') AS client_errors,'.
 				' quantileIf(0.75)(Duration,'.self::IS_VIEW.') AS load_p75,'.
 				' quantileIf(0.75)('.self::eventMs('firstContentfulPaint').','.self::IS_VIEW.') AS fcp_p75'.
 			$this->browserWhere(),
@@ -83,6 +85,7 @@ class RumStats extends ApmStats {
 			'actions' => (int) ($row['actions'] ?? 0),
 			'requests' => (int) ($row['requests'] ?? 0),
 			'failed' => (int) ($row['failed'] ?? 0),
+			'client_errors' => (int) ($row['client_errors'] ?? 0),
 			'load_p75' => (int) ($row['views'] ?? 0) > 0 ? (float) $row['load_p75'] : null,
 			'fcp_p75' => is_numeric($row['fcp_p75'] ?? null) ? (float) $row['fcp_p75'] : null
 		];
@@ -373,7 +376,7 @@ class RumStats extends ApmStats {
 				' SpanAttributes[\'target_xpath\'] AS xpath,'.
 				' if(SpanAttributes[\'http.request.method\']!=\'\',SpanAttributes[\'http.request.method\'],'.
 					'SpanAttributes[\'http.method\']) AS method,'.
-				' '.self::HTTP_STATUS.' AS status, '.self::failed().' AS failed,'.
+				' '.self::HTTP_STATUS.' AS status, '.self::failed().' AS failed, '.self::clientError().' AS client_error,'.
 				' '.self::eventMs('firstContentfulPaint').' AS fcp'.
 			$this->browserWhere().' AND '.self::SESSION.'={session:String}'.
 				' AND ('.self::IS_VIEW.' OR '.self::IS_ACTION.' OR '.self::IS_REQUEST.')'.
@@ -428,6 +431,7 @@ class RumStats extends ApmStats {
 			'method' => $row['method'],
 			'status' => $row['status'],
 			'failed' => (bool) $row['failed'],
+			'client_error' => (bool) $row['client_error'],
 			'fcp' => is_numeric($row['fcp']) ? (float) $row['fcp'] : null
 		], $rows);
 
@@ -490,8 +494,14 @@ class RumStats extends ApmStats {
 		return sprintf(self::EVENT_MS, $event);
 	}
 
-	// A request failed: HTTP status 400 or more, or the span status is Error.
+	// A request failed: the server failed (HTTP 5xx), or there was no response (span status Error without a status).
+	// A 4xx is the server answering (e.g. 401 before signing in): counted apart, see clientError().
 	private static function failed(): string {
-		return '(StatusCode=\'Error\' OR toUInt16OrZero('.self::HTTP_STATUS.')>=400)';
+		return '(toUInt16OrZero('.self::HTTP_STATUS.')>=500'.
+			' OR (StatusCode=\'Error\' AND toUInt16OrZero('.self::HTTP_STATUS.')=0))';
+	}
+
+	private static function clientError(): string {
+		return '(toUInt16OrZero('.self::HTTP_STATUS.') BETWEEN 400 AND 499)';
 	}
 }

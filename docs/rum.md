@@ -27,9 +27,9 @@ and it respects the roles and the APM filter of the user groups.
 |---|---|
 | Session, user | `session.id`, `enduser.id` on the browser spans |
 | Page load | `documentLoad` span; its events (and those of its `documentFetch` child) give the load phases and the first contentful paint |
-| User action | spans of the user interaction instrumentation (`event_type`, `target_element`, `target_xpath`) |
+| User action | root spans of the user interaction instrumentation (`event_type`, `target_element`, `target_xpath`): one per click, although the instrumentation adds a nested span per event listener |
 | Resource | `resourceFetch` spans |
-| Request | browser spans of kind `Client`; failed = HTTP status ≥ 400 or span status Error |
+| Request | browser spans of kind `Client`; failed = HTTP 5xx or no response (span status Error without a status). A 4xx (e.g. 401 before signing in) is an answer: counted apart, in amber |
 | Backend part of a request | the spans of other services in the same trace |
 | Browser, OS, device | `user_agent.original` |
 | Core Web Vitals | log records with `rum.*` attributes ([below](#core-web-vitals)) |

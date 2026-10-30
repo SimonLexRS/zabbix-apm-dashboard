@@ -94,7 +94,11 @@ class RumHtml {
 					: ''
 			),
 			$card(I18n::t('Requests from the browser'), OverviewHtml::formatCount($kpis['requests']),
-				sprintf(I18n::t('%s failed (%.2f %%)'), OverviewHtml::formatCount($kpis['failed']), $failed_rate),
+				sprintf(I18n::t('%s failed (%.2f %%)'), OverviewHtml::formatCount($kpis['failed']), $failed_rate)
+					.($kpis['client_errors'] > 0
+						? sprintf(I18n::t(' · %s answered 4xx'), OverviewHtml::formatCount($kpis['client_errors']))
+						: ''
+					),
 				$failed_rate >= 5 ? 'apm-map-kpi-bad' : ($failed_rate >= 1 ? 'apm-map-kpi-warn' : null)
 			),
 			$card(I18n::t('First content visible'),
@@ -452,13 +456,16 @@ class RumHtml {
 				$content = [
 					(new CSpan(I18n::t('Request')))->addClass('apm-rum-kind'),
 					(new CSpan($item['method'].' '.$item['page']))->setTitle($item['url']),
-					(new CSpan($status))->addClass('apm-pill')->addClass($item['failed'] ? 'apm-pill-bad' : 'apm-pill-good'),
+					(new CSpan($status))
+						->addClass('apm-pill')
+						->addClass($item['failed'] ? 'apm-pill-bad' : ($item['client_error'] ? 'apm-pill-warn' : 'apm-pill-good')),
 					(new CSpan(ApmStats::formatDuration($item['duration'])))->addClass(ZBX_STYLE_GREY),
 					$trace !== null
 						? (new CSpan([
 							'→ ',
 							implode(' → ', $trace['services']),
-							$trace['error_service'] !== null
+							// A 4xx is an answer, not a failure of the service that gave it.
+							$item['failed'] && $trace['error_service'] !== null
 								? (new CSpan(sprintf(I18n::t(' · fails in %s'), $trace['error_service'])))->addClass(ZBX_STYLE_RED)
 								: null
 						]))->addClass('apm-rum-backend')

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1
+
+- Real user monitoring:
+  - **A request fails on a 5xx or when there is no response.** A 4xx (e.g. 401 before signing in) is counted apart and shown in amber, and the timeline no longer blames the backend service that answered it.
+  - **One action per click.** The user interaction instrumentation adds a nested span per event listener; only the root one counts. With React, every click used to count several times.
+
 ## 2.1.0
 
 - Real user monitoring lists every application again; the ones without browser telemetry are muted and offer

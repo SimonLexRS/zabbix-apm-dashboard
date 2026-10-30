@@ -27,9 +27,9 @@ real, y respeta los roles y el APM filter de los grupos de usuarios.
 |---|---|
 | Sesión, usuario | `session.id`, `enduser.id` en los spans del navegador |
 | Carga de página | span `documentLoad`; sus eventos (y los de su hijo `documentFetch`) dan las fases de la carga y el primer contenido visible |
-| Acción de usuario | spans de la instrumentación de interacción de usuario (`event_type`, `target_element`, `target_xpath`) |
+| Acción de usuario | spans raíz de la instrumentación de interacción de usuario (`event_type`, `target_element`, `target_xpath`): uno por clic, aunque la instrumentación añade un span anidado por cada manejador del evento |
 | Recurso | spans `resourceFetch` |
-| Petición | spans del navegador de tipo `Client`; fallida = estado HTTP ≥ 400 o estado del span Error |
+| Petición | spans del navegador de tipo `Client`; fallida = HTTP 5xx o sin respuesta (estado del span Error sin código). Un 4xx (p. ej. 401 antes de iniciar sesión) es una respuesta: se cuenta aparte, en ámbar |
 | Parte de backend de una petición | los spans de otros servicios en la misma traza |
 | Navegador, SO, dispositivo | `user_agent.original` |
 | Core Web Vitals | registros de log con atributos `rum.*` ([más abajo](#core-web-vitals)) |

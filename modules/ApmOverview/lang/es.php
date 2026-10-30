@@ -465,4 +465,5 @@ return [
 	'npm / bundler' => 'npm / bundler',
 	'the resources, browsers and operating systems of the users.' => 'los recursos, navegadores y sistemas operativos de los usuarios.',
 	'the sessions of real users, step by step, down to the backend service of each request;' => 'las sesiones de usuarios reales, paso a paso, hasta el servicio del backend de cada petición;',
+	' · %s answered 4xx' => ' · %s respondieron 4xx',
 ];
