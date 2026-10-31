@@ -7,6 +7,7 @@
 - `scripts/install.sh` finds the frontend in more paths and asks for `ZABBIX_UI` when it finds several.
 - Fixed `examples/clickhouse-users.sql`: the writer user needs `CREATE DATABASE`, or the collector does not start.
 - OpenTelemetry Demo guide tested step by step on Ubuntu, next to Zabbix: `compose.zabbix-lite.yaml` (without Jaeger, Grafana, Prometheus and OpenSearch), `otelcol-docker-bridge.yaml`, and the problems found.
+- Real user monitoring guide: how it works, how to implement it and how to test it, with `scripts/test-rum.py`.
 - `scripts/zabbix-apm-app.py add --timeshift` sets `{$OTLP.TIMESHIFT}`, needed when spans cross two collectors.
 
 ## 2.1.1

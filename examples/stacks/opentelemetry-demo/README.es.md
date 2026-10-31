@@ -152,6 +152,9 @@ En la web:
 | **Monitoring → Hosts → apm-opentelemetry-demo** | Latest data con valores nuevos |
 | **Dashboards → Add widget** | **APM service map** y **APM service health** con *Application* = `opentelemetry-demo` |
 
+> [!NOTE]
+> Este demo llena **APM → Real user monitoring**, salvo los Web Vitals, que no envía. Cómo probarlo: [testing de RUM](../../../docs/rum.es.md#cómo-hacer-testing).
+
 > [!TIP]
 > Para generar errores y verlos en APM, cambia un *feature flag* en `http://<IP-de-tu-server>:18080/feature`, por ejemplo `paymentFailure`.
 
