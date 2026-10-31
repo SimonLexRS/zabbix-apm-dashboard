@@ -50,7 +50,7 @@ The modules apply the **APM filter** of the user's groups (Users → User groups
 do: only telemetry whose resource attributes match a filter is shown, and Super admins are not filtered. Check that
 the filter matches the data, e.g. Key `service.namespace` and the exact namespace. Without *APM → Logs* or *APM →
 Metrics* in the role, logs and metrics are hidden as well. See
-[install-module.md](install-module.md#who-sees-what).
+[install-module.md](install-module.md#step-4-see-data-and-give-access).
 
 ## The page is in English for a Spanish user
 

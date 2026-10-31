@@ -57,7 +57,7 @@
   - logs and metrics figures and links are shown only to roles with *APM → Logs* / *APM → Metrics*.
 
   Before, any user with *APM → Traces* saw the telemetry of every application.
-- Docs: "Who sees what" in [docs/install-module.md](docs/install-module.md#who-sees-what), with the APM filter of a user
+- Docs: "Who sees what" in [docs/install-module.md](docs/install-module.md#step-4-see-data-and-give-access), with the APM filter of a user
   group.
 
 ## 1.8.0
