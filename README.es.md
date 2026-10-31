@@ -20,7 +20,7 @@ Monitoreo del rendimiento de aplicaciones (APM) en **Zabbix 8.0** para cualquier
 | `templates/apm_services_clickhouse_http.yaml` | Opcional: items y triggers por servicio, endpoint y conexión (tasa de error, p95, Apdex). |
 | `scripts/zabbix-apm-app.py` | Da de alta una aplicación por la API de Zabbix (template, host `apm-<namespace>` y macro). Idempotente. |
 | `scripts/verify-app.py` | Comprueba una aplicación de punta a punta y compara los valores de Zabbix con ClickHouse. |
-| `examples/stacks/` | Instrumentación por stack: [Go](examples/stacks/go/README.es.md) (ejecutable), [Java/Python/Node.js/.NET/Kubernetes](examples/stacks/zero-code/README.es.md), [OpenTelemetry Demo / collector propio](examples/stacks/opentelemetry-demo/README.es.md). |
+| `examples/stacks/` | Instrumentación por stack: [Go](examples/stacks/go/README.es.md) (ejecutable), [Java/Python/Node.js/.NET/Kubernetes](examples/stacks/zero-code/README.es.md), [OpenTelemetry Demo paso a paso en Ubuntu](examples/stacks/opentelemetry-demo/README.es.md). |
 
 Español e inglés: los módulos siguen el idioma del usuario de Zabbix.
 

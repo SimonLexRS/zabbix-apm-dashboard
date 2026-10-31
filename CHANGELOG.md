@@ -6,6 +6,8 @@
 - `scripts/enable-modules.py` registers and enables the modules through the API, with an API token.
 - `scripts/install.sh` finds the frontend in more paths and asks for `ZABBIX_UI` when it finds several.
 - Fixed `examples/clickhouse-users.sql`: the writer user needs `CREATE DATABASE`, or the collector does not start.
+- OpenTelemetry Demo guide tested step by step on Ubuntu, next to Zabbix: `compose.zabbix-lite.yaml` (without Jaeger, Grafana, Prometheus and OpenSearch), `otelcol-docker-bridge.yaml`, and the problems found.
+- `scripts/zabbix-apm-app.py add --timeshift` sets `{$OTLP.TIMESHIFT}`, needed when spans cross two collectors.
 
 ## 2.1.1
 

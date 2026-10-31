@@ -24,6 +24,7 @@ TEMPLATE_FILE = Path(__file__).resolve().parent.parent / 'templates/otel_applica
 TEMPLATE_NAME = 'OpenTelemetry application by OTLP'
 HOST_GROUP = 'Applications/APM'
 NAMESPACE_MACRO = '{$OTLP.NAMESPACE}'
+TIMESHIFT_MACRO = '{$OTLP.TIMESHIFT}'
 
 
 class Api:
@@ -74,7 +75,7 @@ def host_group_id(api: Api) -> str:
     return groups[0]['groupid'] if groups else api.call('hostgroup.create', {'name': HOST_GROUP})['groupids'][0]
 
 
-def add(api: Api, namespace: str, name: str | None) -> None:
+def add(api: Api, namespace: str, name: str | None, timeshift: str | None = None) -> None:
     # Host names allow letters, digits, spaces, dots, dashes and underscores; other characters become "-".
     host = 'apm-' + re.sub(r'[^0-9A-Za-z._ -]', '-', namespace)
     templateid = import_template(api)
@@ -90,6 +91,15 @@ def add(api: Api, namespace: str, name: str | None) -> None:
         }]
     }
 
+    if timeshift:
+        fields['macros'].append({
+            'macro': TIMESHIFT_MACRO,
+            'value': timeshift,
+            'description': 'Wait for late spans before reading each window (zabbix-apm-app.py)'
+        })
+
+    ours = {m['macro'] for m in fields['macros']}
+
     existing = api.call('host.get', {'output': ['hostid'], 'filter': {'host': host}})
 
     if existing:
@@ -100,7 +110,7 @@ def add(api: Api, namespace: str, name: str | None) -> None:
             'selectHostGroups': ['groupid']
         })[0]
         fields['templates'] += [t for t in current['parentTemplates'] if t['templateid'] != templateid]
-        fields['macros'] += [m for m in current['macros'] if m['macro'] != NAMESPACE_MACRO]
+        fields['macros'] += [m for m in current['macros'] if m['macro'] not in ours]
         fields['groups'] += [g for g in current['hostgroups'] if g['groupid'] != groupid]
         api.call('host.update', {'hostid': current['hostid'], **fields})
         print(f'updated {host} ({fields["name"]}): {NAMESPACE_MACRO}={namespace}')
@@ -133,6 +143,7 @@ def main() -> int:
     add_parser = commands.add_parser('add', help='monitor an application (service.namespace)')
     add_parser.add_argument('namespace', help='service.namespace sent by the application')
     add_parser.add_argument('--name', help='visible host name (default: "APM <namespace>")')
+    add_parser.add_argument('--timeshift', help='{$OTLP.TIMESHIFT} of the host, e.g. 60s when spans cross two collectors')
     commands.add_parser('list', help='applications monitored with the template')
     args = parser.parse_args()
 

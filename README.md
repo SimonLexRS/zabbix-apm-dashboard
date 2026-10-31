@@ -18,7 +18,7 @@ and Docker Compose applications.
 | `templates/apm_services_clickhouse_http.yaml` | Optional: items and triggers per service, endpoint and connection (error rate, p95, Apdex). |
 | `scripts/zabbix-apm-app.py` | Onboards an application through the Zabbix API: template, host `apm-<namespace>`, macro. Idempotent. |
 | `scripts/verify-app.py` | Checks an application end to end and compares the Zabbix values with ClickHouse. |
-| `examples/stacks/` | Instrumentation per stack: [Go](examples/stacks/go/README.md) (runnable), [Java/Python/Node.js/.NET/Kubernetes](examples/stacks/zero-code/README.md), [OpenTelemetry Demo / own collector](examples/stacks/opentelemetry-demo/README.md). |
+| `examples/stacks/` | Instrumentation per stack: [Go](examples/stacks/go/README.md) (runnable), [Java/Python/Node.js/.NET/Kubernetes](examples/stacks/zero-code/README.md), [OpenTelemetry Demo step by step on Ubuntu](examples/stacks/opentelemetry-demo/README.md). |
 
 English and Spanish: the modules follow the language of the Zabbix user.
 

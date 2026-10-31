@@ -1,0 +1,18 @@
+# Extra configuration for the Zabbix APM collector when the application runs in Docker on the same server: receive OTLP
+# on the Docker bridge as well, without opening it on the network. Load it as a second --config file; see README.md.
+receivers:
+  otlp/docker:
+    protocols:
+      grpc:
+        endpoint: 172.17.0.1:4317
+      http:
+        endpoint: 172.17.0.1:4318
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp, otlp/docker]
+    metrics:
+      receivers: [otlp, otlp/docker]
+    logs:
+      receivers: [otlp, otlp/docker]
