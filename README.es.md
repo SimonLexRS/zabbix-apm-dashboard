@@ -1,148 +1,189 @@
+<div align="center">
+
 # Zabbix APM Dashboard
 
-[English](README.md)
+**Ve dentro de tus aplicaciones desde Zabbix 8: qué petición es lenta, qué falla y qué viven tus usuarios.**
 
-> **¿Vas a instalarlo?** Empieza por la [guía paso a paso en Ubuntu](docs/guia-ubuntu-paso-a-paso.md): de un server con solo Zabbix 8 a APM, módulos, tienda de prueba y RUM, con comandos comprobados y los problemas encontrados.
+[![CI](https://github.com/SimonLexRS/zabbix-apm-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/SimonLexRS/zabbix-apm-dashboard/actions/workflows/ci.yml)
+![Zabbix 8.0](https://img.shields.io/badge/Zabbix-8.0-d40000)
+![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-OTLP-4f62ad)
+![ClickHouse](https://img.shields.io/badge/ClickHouse-storage-f9a825)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-Monitoreo del rendimiento de aplicaciones (APM) en **Zabbix 8.0** para cualquier aplicación instrumentada con
-**OpenTelemetry**. Incluye:
-- módulos de frontend: mapa de servicios, métricas RED por servicio y endpoint, errores agrupados, experiencia del
-  usuario, origen de la lentitud y una pestaña por aplicación;
-- un template derivado del template oficial de OpenTelemetry de Zabbix, con un host por aplicación y sus triggers;
-- scripts de alta y de verificación;
-- guías paso a paso para aplicaciones en Go, Java, Python, Node.js, .NET, Kubernetes y Docker Compose.
+Español · [English](README.md)
 
-![OpenTelemetry Demo en APM Overview: mapa de servicios](docs/screenshots/otel-demo-service-map.png)
+**[🚀 Instalar paso a paso](docs/guia-ubuntu-paso-a-paso.md)** · [Qué obtienes](#qué-obtienes) · [Cómo funciona](#cómo-funciona) · [Elige tu camino](#elige-tu-camino) · [Documentación](#documentación)
 
-| Componente | Qué aporta |
+![Mapa de servicios del OpenTelemetry Demo en APM Overview](docs/screenshots/otel-demo-service-map.png)
+
+</div>
+
+Módulos, plantillas y guías que convierten a Zabbix 8.0 en una plataforma de **monitoreo del rendimiento de aplicaciones (APM)** para cualquier aplicación con **OpenTelemetry**, en cualquier lenguaje.
+
+## 🚀 Instálalo paso a paso
+
+> [!IMPORTANT]
+> ### [Abrir la guía: de Zabbix 8 a APM completo en Ubuntu →](docs/guia-ubuntu-paso-a-paso.md)
+>
+> Parte de un server **con solo Zabbix 8** y termina con todo funcionando y datos reales. Sus comandos se ejecutaron de principio a fin, y explica cada problema que apareció y cómo se resolvió. También en [inglés](docs/ubuntu-step-by-step.md).
+
+| Paso | Qué haces | Cómo sabes que funcionó |
+|---|---|---|
+| **1. Base** | Preparas el server y descargas el repositorio | Terminal en la carpeta del proyecto |
+| **2. ClickHouse** | Instalas el almacén de trazas, con usuarios propios | Responde la base `zabbix` |
+| **3. Collector** | Instalas OpenTelemetry Collector, verificado y sin exponerlo a la red | Puertos solo en `127.0.0.1` |
+| **4-5. Módulos** | Los instalas y conectas Zabbix con ClickHouse por API | Aparece **APM → Overview** |
+| **6. Prueba** | Envías trazas de prueba | `all checks passed` |
+| **7-9. Tienda** | Despliegas una tienda real de unos 20 servicios en Docker | 23 contenedores y datos en Zabbix |
+| **10. RUM** | Compruebas lo que viven los usuarios en el navegador | `all required checks passed` |
+
+**Necesitas:** Ubuntu con Zabbix 8.0, `sudo`, un token de API de Super admin, 10 GiB de RAM y 20 GB libres. Con 4 GiB puedes llegar hasta APM, sin la tienda.
+
+**Incluye:** [17 problemas reales con su solución](docs/guia-ubuntu-paso-a-paso.md#problemas-que-aparecieron-y-cómo-se-resolvieron) y una [comprobación final](docs/guia-ubuntu-paso-a-paso.md#para-comprobar-todo-al-final).
+
+## Qué obtienes
+
+| Quieres saber | Lo encuentras en | Dónde |
+|---|---|---|
+| ¿Cómo se conectan mis servicios y cuál falla? | **Mapa de servicios** en vivo, con la salud y el tráfico de cada conexión | APM → Overview |
+| ¿Qué servicio o endpoint va mal? | **Métricas RED:** tasa, errores y duración, con tendencia | APM → Overview |
+| ¿Qué error se repite? | **Errores agrupados**, con veces, última aparición y traza | APM → Overview |
+| ¿Dónde se pierde el tiempo? | **Origen de la lentitud:** código, base de datos u otros servicios, con cascadas y consultas costosas | APM → Overview |
+| ¿Qué viven mis usuarios? | **RUM:** sesiones hasta el backend, cargas de página, recursos y Core Web Vitals | APM → Real user monitoring |
+| ¿Puedo verlo junto a mi monitoreo? | **Widgets** APM service map y APM service health | Dashboards |
+| ¿Me avisa si algo va mal? | **Plantilla** con items, triggers y dashboard por aplicación | Host `apm-<aplicación>` |
+| ¿Cómo conecto mi aplicación? | **Guía interactiva por lenguaje**, con comprobaciones en vivo | APM → Overview → Cómo funciona |
+
+Respeta los roles y los APM filter de Zabbix, se actualiza en tiempo real y sigue el idioma del usuario, en español o inglés.
+
+| Mapa de servicios: sigue el camino de un servicio | Monitoreo de usuarios reales |
 |---|---|
-| `modules/ApmOverview` | Página **APM → Overview**: una pestaña por aplicación (`service.namespace`), con Estado, Mapa de servicios, Servicios, Endpoints, Errores, Experiencia del usuario, Origen de la lentitud y **Cómo funciona**: una guía interactiva por lenguaje (Go, Python, Java, Node.js, .NET, PHP, Ruby, Docker Compose, Kubernetes) con comprobaciones en vivo de la aplicación. Página **APM → Real user monitoring**: cargas de página, sesiones con su línea de tiempo hasta los servicios del backend, recursos y Core Web Vitals, desde el SDK web de OpenTelemetry ([docs/rum.es.md](docs/rum.es.md)). Actualización en tiempo real. |
-| `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Widgets de dashboard: mapa de servicios y tabla de salud de servicios, con campo *Aplicación*. |
-| `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: el oficial *Generic OpenTelemetry by OTLP* limitado a una aplicación. Spans por estado, duraciones, % de error, logs por severidad, triggers y dashboard. [Detalles](docs/apm-template.es.md). |
-| `templates/apm_services_clickhouse_http.yaml` | Opcional: items y triggers por servicio, endpoint y conexión (tasa de error, p95, Apdex). |
-| `scripts/zabbix-apm-app.py` | Da de alta una aplicación por la API de Zabbix (template, host `apm-<namespace>` y macro). Idempotente. |
-| `scripts/verify-app.py` | Comprueba una aplicación de punta a punta y compara los valores de Zabbix con ClickHouse. |
-| `examples/stacks/` | Instrumentación por stack: [Go](examples/stacks/go/README.es.md) (ejecutable), [Java/Python/Node.js/.NET/Kubernetes](examples/stacks/zero-code/README.es.md), [OpenTelemetry Demo paso a paso en Ubuntu](examples/stacks/opentelemetry-demo/README.es.md). |
-
-Español e inglés: los módulos siguen el idioma del usuario de Zabbix.
+| ![Camino de un servicio](docs/screenshots/service-map-hover.png) | ![Resumen de RUM](docs/screenshots/rum-overview.png) |
 
 ## Cómo funciona
 
+```mermaid
+flowchart LR
+    A["Tus aplicaciones y navegadores con OpenTelemetry"] -->|"OTLP"| B["OpenTelemetry Collector"]
+    B --> C[("ClickHouse")]
+    C --> D["APM → Overview, RUM y widgets"]
+    C --> E["Host apm-aplicación: items, triggers y dashboard"]
 ```
-tus aplicaciones ──OTLP──▶ OpenTelemetry Collector ──▶ ClickHouse (zabbix.otel_*)
-  service.name                                              │
-  service.namespace = la aplicación ◀── todo se organiza por él
-                                                            ├──▶ APM → Overview (pestaña por aplicación) + widgets
-                                                            └──▶ host apm-<aplicación>: items del template, triggers, dashboard
+
+Una aplicación se identifica por el atributo estándar **`service.namespace`**. Nada en Zabbix ni en estos módulos es específico de una aplicación: para una nueva bastan las variables `OTEL_*` y un comando.
+
+```sh
+OTEL_SERVICE_NAME=checkout-api
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=shop
+OTEL_EXPORTER_OTLP_ENDPOINT=http://<collector>:4317
+
+python3 scripts/zabbix-apm-app.py add shop      # crea su host en Zabbix
+python3 scripts/verify-app.py shop              # all checks passed
 ```
 
-Una aplicación se identifica por el atributo de recurso estándar **`service.namespace`**. Nada en Zabbix ni en estos
-módulos es específico de una aplicación: para una nueva bastan las variables `OTEL_*` y un comando.
+## Elige tu camino
 
-## Pruébalo en 5 minutos (laboratorio)
+| Quiero | Empieza aquí |
+|---|---|
+| **Instalarlo en Ubuntu con Zabbix 8** | [**Guía paso a paso**](docs/guia-ubuntu-paso-a-paso.md) |
+| Verlo funcionar antes de tocar mi Zabbix | [Laboratorio en Docker](docs/lab.es.md), en 5 minutos |
+| Instalarlo en varias máquinas u otra distribución | [Instalación de referencia](docs/installation.es.md) |
+| Instalar solo los módulos | [Módulos](docs/install-module.es.md) |
+| Conectar mi aplicación | [Agregar una aplicación](docs/add-application.es.md) y [ejemplos por stack](#ejemplos-por-stack) |
+| Monitorear los navegadores de mis usuarios | [RUM: implementación y testing](docs/rum.es.md) |
 
-Todo en Docker en tu máquina (Zabbix 8.0, ClickHouse, un collector, los módulos y un servicio Go instrumentado), para
-verlo funcionar antes de tocar tu Zabbix: [docs/lab.es.md](docs/lab.es.md).
+Laboratorio, sin instalar nada en tu Zabbix:
 
 ```sh
 cd examples/lab && cp .env.example .env && docker compose up -d --build && python3 ../../scripts/lab-bootstrap.py
 ```
 
-## Haz fork y replícalo
-
-Nada en el código está atado a una instalación: las aplicaciones se identifican por `service.namespace`, los endpoints y
-las credenciales son variables, y el template se genera a partir del propio de Zabbix. En un fork:
-
-1. Ejecuta el [laboratorio](docs/lab.es.md) para comprobar tus cambios (`php tests/run.php` y la CI hacen el resto).
-2. Instala en tu Zabbix: [installation.es.md](docs/installation.es.md); los módulos, paso a paso con capturas, en
-   [install-module.es.md](docs/install-module.es.md).
-3. Conecta tus aplicaciones: [add-application.es.md](docs/add-application.es.md) y [examples/stacks](examples/stacks).
-
-Opcional: los enlaces de las páginas del módulo y de los manifests apuntan a este repositorio (`OverviewHtml::DOCS_URL`
-en `modules/ApmOverview/includes/OverviewHtml.php` y `url` en `modules/*/manifest.json`). Cámbialos a tu fork si publicas
-tu propia documentación.
-
-## Inicio rápido
-
-1. **Instala una vez por Zabbix** ClickHouse, el collector, la fuente de datos, los módulos y el template:
-   [docs/installation.es.md](docs/installation.es.md).
-2. **Instrumenta la aplicación** con las variables estándar (ejemplos de código por stack en [examples/stacks](examples/stacks)):
-
-   ```sh
-   OTEL_SERVICE_NAME=checkout-api
-   OTEL_RESOURCE_ATTRIBUTES=service.namespace=shop
-   OTEL_EXPORTER_OTLP_ENDPOINT=http://<collector>:4317
-   ```
-
-3. **Crea su host:** `python3 scripts/zabbix-apm-app.py add shop`
-4. **Verifica:** `python3 scripts/verify-app.py shop` debe terminar con `all checks passed`.
-5. **Mira el resultado** en **APM → Overview → shop** y en **Monitoring → Hosts → apm-shop**.
-
-Por aplicación, en detalle: [docs/add-application.es.md](docs/add-application.es.md).
-
-## Verificado
-
-Probado en Zabbix 8.0.0rc3, ClickHouse 26.9 y otelcol-contrib 0.162 con cuatro aplicaciones: el OpenTelemetry Demo
-(unos 20 servicios en 10 lenguajes), una API Go en producción, el ejemplo Go y una prueba de humo con `telemetrygen`.
-Los valores del template coinciden con ClickHouse para cada aplicación. También se probó una instalación con Zabbix compilado desde fuente en Ubuntu 26.10 ARM64, con PHP 8.5, ClickHouse 26.10 y otelcol-contrib 0.164, usando una prueba de humo con `telemetrygen`. Método, resultados y cómo repetirlo:
-[docs/verification.es.md](docs/verification.es.md).
-
 ## Capturas
 
-| Cómo funciona: guía por lenguaje, rellenada para la aplicación | Comprobaciones en vivo de la aplicación |
+| Guía por lenguaje, rellenada para tu aplicación | Comprobaciones en vivo |
 |---|---|
 | ![Cómo funciona](docs/screenshots/how-it-works.png) | ![Comprobaciones](docs/screenshots/how-it-works-checks.png) |
-| **Servicios del OpenTelemetry Demo** | **La tienda del OpenTelemetry Demo** |
+| **Servicios del OpenTelemetry Demo** | **La tienda de prueba** |
 | ![Servicios](docs/screenshots/otel-demo-services.png) | ![Tienda](docs/screenshots/otel-demo-store.png) |
-| **Mapa de servicios: pasa el ratón por un servicio para seguir su camino** | **Widget del mapa en un dashboard** |
-| ![Camino de un servicio](docs/screenshots/service-map-hover.png) | ![Widget](docs/screenshots/service-map-widget.png) |
+| **Línea de tiempo de una sesión de RUM** | **Widget del mapa en un dashboard** |
+| ![Sesión](docs/screenshots/rum-session.png) | ![Widget](docs/screenshots/service-map-widget.png) |
 
-Más: [experiencia del usuario](docs/screenshots/user-experience.png), [origen de la lentitud](docs/screenshots/origin-of-slowness-dark.png).
+Más: [experiencia del usuario](docs/screenshots/user-experience.png) y [origen de la lentitud](docs/screenshots/origin-of-slowness-dark.png).
+
+<details>
+<summary><strong>Qué responde cada pestaña de APM → Overview</strong></summary>
+
+- **Estado**: ¿llega la telemetría? Fuente de datos, conexión y registros por señal.
+- **Mapa de servicios**: el estado del sistema ahora (tráfico de entrada, tasa de error, servicio más lento, qué requiere atención) y el flujo en vivo de los usuarios a los servicios, bases de datos y servicios externos. Las flechas se colorean por salud, son tan gruesas como su tráfico y tienen partículas en movimiento; pasa el ratón por un servicio para seguir su camino y ver sus cifras, y haz clic para ver dónde se va su tiempo.
+- **Servicios / Endpoints**: métricas RED (tasa, errores, duración) con tendencias por minuto.
+- **Errores**: fallos agrupados por servicio, endpoint y mensaje, con veces, primera y última vez y la última traza.
+- **Experiencia del usuario**: Core Web Vitals ([docs/rum.es.md](docs/rum.es.md)), Apdex por servicio y endpoint, e histogramas de latencia.
+- **Origen de la lentitud**: tiempo por endpoint (código propio / base de datos / otros servicios), las peticiones más lentas con su cascada de spans, las consultas más costosas y los endpoints más lentos que en el periodo anterior.
+
+El filtro de servicio acepta un texto contenido (`checkout`), un comodín (`demo-*`) o un nombre exacto (`=api`). Solo se consulta la pestaña visible, cada 10 s / 30 s o a demanda.
+
+</details>
+
+## Qué incluye
+
+| Componente | Qué aporta |
+|---|---|
+| `modules/ApmOverview` | Páginas **APM → Overview** y **APM → Real user monitoring** |
+| `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Widgets de dashboard, con campo *Aplicación* |
+| `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: el oficial *Generic OpenTelemetry by OTLP* limitado a una aplicación. [Detalles](docs/apm-template.es.md) |
+| `templates/apm_services_clickhouse_http.yaml` | Opcional: items y triggers por servicio, endpoint y conexión (tasa de error, p95, Apdex) |
+| `scripts/install.sh`, `scripts/enable-modules.py` | Instalan y habilitan los módulos |
+| `scripts/zabbix-apm-app.py` | Da de alta una aplicación por API: plantilla, host y macros. Idempotente |
+| `scripts/verify-app.py` | Comprueba una aplicación de punta a punta y compara Zabbix con ClickHouse |
+| `scripts/test-rum.py` | Comprueba los datos del navegador y puede enviar Web Vitals sintéticos |
+
+### Ejemplos por stack
+
+- [Go](examples/stacks/go/README.es.md), ejecutable
+- [Java, Python, Node.js, .NET y Kubernetes](examples/stacks/zero-code/README.es.md), sin cambiar código
+- [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.es.md): tienda de unos 20 servicios en 10 lenguajes
+
+## Qué se comprobó
+
+| Prueba | Alcance |
+|---|---|
+| **[Guía paso a paso](docs/guia-ubuntu-paso-a-paso.md), de principio a fin** | Ubuntu 26.10 ARM64, Zabbix 8.0.0rc3 compilado desde fuente, PostgreSQL, PHP 8.5, ClickHouse 26.10 y otelcol-contrib 0.164 |
+| **[Verificación con cuatro aplicaciones](docs/verification.es.md)** | Zabbix 8.0.0rc3, ClickHouse 26.9 y otelcol-contrib 0.162: OpenTelemetry Demo, una API Go en producción, el ejemplo Go y `telemetrygen`. Los valores coinciden con ClickHouse |
+
+> [!NOTE]
+> **Sin ejecutar con la guía:** AMD64, otras versiones de Ubuntu y Zabbix instalado por paquetes. La prueba con un navegador real tampoco se ejecutó. Zabbix 8.0.0rc3 es una versión candidata.
 
 ## Documentación
 
-| Guía | |
+| Empezar | |
 |---|---|
-| [lab.es.md](docs/lab.es.md) | Todo en Docker en tu máquina, en 5 minutos |
-| [installation.es.md](docs/installation.es.md) | Una vez por Zabbix, paso a paso, con una comprobación por paso y una prueba de humo |
-| [install-module.es.md](docs/install-module.es.md) | Los módulos en Zabbix, pantalla a pantalla |
-| [add-application.es.md](docs/add-application.es.md) | Cada aplicación: instrumentar, llegar al collector, host en Zabbix, verificar |
-| [apm-template.es.md](docs/apm-template.es.md) | El template APM: items, triggers, macros, ajuste y actualizaciones |
-| [verification.es.md](docs/verification.es.md) | Qué se probó y cómo repetirlo |
-| [rum.es.md](docs/rum.es.md) | Monitorización de usuarios reales: páginas, sesiones, recursos y Web Vitals de navegadores reales |
-| [troubleshooting.md](docs/troubleshooting.md) | Problemas frecuentes (en inglés) |
+| [**Guía paso a paso en Ubuntu**](docs/guia-ubuntu-paso-a-paso.md) | De un server con solo Zabbix 8 a APM completo |
+| [Laboratorio](docs/lab.es.md) | Todo en Docker en tu máquina, en 5 minutos |
 
-## Qué responde cada pestaña
+| Conectar | |
+|---|---|
+| [Agregar una aplicación](docs/add-application.es.md) | Instrumentar, llegar al Collector, crear el host y verificar |
+| [Monitoreo de usuarios reales](docs/rum.es.md) | Cómo funciona, cómo se implementa y cómo hacer testing |
+| [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.es.md) | La tienda de prueba, con sus problemas y soluciones |
 
-- **Estado**: ¿llega la telemetría? Fuente de datos, conexión y registros por señal.
-- **Mapa de servicios**: el estado del sistema ahora (tráfico de entrada, tasa de error, servicio más lento, qué requiere
-  atención) y el flujo en vivo de los usuarios a los servicios, bases de datos y servicios externos: flechas coloreadas
-  por salud, tan gruesas como su tráfico y con partículas en movimiento; pasa el ratón por un servicio para seguir su
-  camino y ver sus cifras, haz clic para ver dónde se va su tiempo.
-- **Servicios / Endpoints**: métricas RED (tasa, errores, duración) con tendencias por minuto.
-- **Errores**: fallos agrupados por servicio, endpoint y mensaje, con veces, primera y última vez y la última traza.
-- **Experiencia del usuario**: Core Web Vitals (ver [docs/rum.es.md](docs/rum.es.md)), Apdex por servicio y endpoint, e
-  histogramas de latencia.
-- **Origen de la lentitud**: tiempo por endpoint (código propio / base de datos / otros servicios), las peticiones más
-  lentas con su cascada de spans, las consultas más costosas y los endpoints más lentos que en el periodo anterior.
+| Referencia | |
+|---|---|
+| [Instalación](docs/installation.es.md) | Para otras distribuciones de máquinas |
+| [Módulos](docs/install-module.es.md) | Cómo funciona APM, módulos, permisos y Docker |
+| [Plantilla APM](docs/apm-template.es.md) | Items, triggers, macros, ajuste y actualizaciones |
+| [Verificación](docs/verification.es.md) | Qué se probó y cómo repetirlo |
+| [Problemas frecuentes](docs/troubleshooting.md) | Solución de problemas (en inglés) |
 
-El filtro de servicio acepta un texto contenido (`checkout`), un comodín (`demo-*`) o un nombre exacto (`=api`). Solo se
-consulta la pestaña visible, cada 10 s / 30 s o a demanda.
-
-## Desarrollo
+## Desarrollo y forks
 
 ```sh
 php tests/run.php                                   # tests de los módulos (no necesitan Zabbix)
-python3 scripts/build-otlp-app-template.py --check  # template generado al día
+python3 scripts/build-otlp-app-template.py --check  # plantilla generada al día
 ```
 
-La CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
-- pasa el lint de PHP 8.2–8.4 y de JavaScript, y ejecuta los tests;
-- valida los manifests y los templates, y comprueba que el template generado está al día;
-- compila el ejemplo Go;
-- instala y desinstala en un frontend simulado.
+La [CI](.github/workflows/ci.yml) pasa el lint de PHP 8.2–8.4 y de JavaScript, ejecuta los tests, valida manifests y plantillas, comprueba que la plantilla generada está al día, compila el ejemplo Go e instala y desinstala en un frontend simulado. Las traducciones están en `modules/*/lang/es.php`, indexadas por el texto en inglés.
 
-Las traducciones están en `modules/*/lang/es.php`, indexadas por el texto en inglés.
+**¿Haces un fork?** Nada está atado a una instalación: los endpoints y las credenciales son variables, y la plantilla se genera a partir de la de Zabbix. Comprueba tus cambios en el [laboratorio](docs/lab.es.md). Los enlaces de las páginas del módulo y de los manifests apuntan a este repositorio (`OverviewHtml::DOCS_URL` en `modules/ApmOverview/includes/OverviewHtml.php` y `url` en `modules/*/manifest.json`): cámbialos si publicas tu propia documentación.
 
 ## Licencia
 
