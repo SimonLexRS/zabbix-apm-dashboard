@@ -79,7 +79,7 @@ Pantalla a pantalla, con capturas: [install-module.es.md](install-module.es.md).
 ```sh
 git clone https://github.com/SimonLexRS/zabbix-apm-dashboard.git
 cd zabbix-apm-dashboard
-sudo ./scripts/install.sh            # encuentra /usr/share/zabbix/ui; ZABBIX_UI=/ruta para otro directorio
+sudo ./scripts/install.sh            # encuentra el frontend; ZABBIX_UI=/ruta para otro directorio
 ```
 
 El script comprueba la sintaxis PHP, respalda la versión anterior en `/var/backups/zabbix-apm-dashboard-<fecha>` y copia

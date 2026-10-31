@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Installation guide rewritten:** shorter, with how APM works, what the modules add and a check per step.
+- `scripts/enable-modules.py` registers and enables the modules through the API, with an API token.
+- `scripts/install.sh` finds the frontend in more paths and asks for `ZABBIX_UI` when it finds several.
+- Fixed `examples/clickhouse-users.sql`: the writer user needs `CREATE DATABASE`, or the collector does not start.
+
 ## 2.1.1
 
 - Real user monitoring:

@@ -1,36 +1,118 @@
-# Instalar los módulos en Zabbix
+# Instalar los módulos APM en Zabbix
 
 [English](install-module.md)
 
-El repositorio trae tres módulos de frontend de Zabbix. Son carpetas PHP que Zabbix carga desde `<frontend>/modules`:
+Guía para cualquier Linux con Zabbix 8.0: paquetes, compilación desde fuente o Docker.
 
-| Carpeta | Módulo | Tipo |
+## Cómo funciona APM
+
+Las métricas de infraestructura dicen que un server está bien. **APM** (*Application Performance Monitoring*) responde lo que ve el usuario: qué petición es lenta, qué falla y en qué servicio o consulta se pierde el tiempo.
+
+Cada petición genera una **traza**, formada por **spans**: uno por cada paso (API, base de datos, otro servicio). De ahí salen las métricas **RED**: tasa de peticiones (*Rate*), errores (*Errors*) y duración (*Duration*).
+
+```mermaid
+flowchart LR
+    A["Tu aplicación con OpenTelemetry"] -->|"OTLP"| B["OpenTelemetry Collector"]
+    B --> C[("ClickHouse")]
+    C --> D["Páginas APM de Zabbix"]
+    C --> E["Estos módulos"]
+    C --> F["Items y triggers"]
+```
+
+Zabbix **no guarda las trazas en su base**: las lee de ClickHouse. Por eso los módulos necesitan el paso 3.
+
+## Qué aportan los módulos
+
+Zabbix 8.0 trae páginas nativas para explorar **Traces, Logs y Metrics**. Los módulos agregan una vista de análisis por aplicación:
+
+| Necesitas saber | Módulo | Dónde |
 |---|---|---|
-| `modules/ApmOverview` | **APM Overview** | Página **APM → Overview** (la necesita el widget del mapa) |
-| `modules/ApmServiceMap` | **APM service map** | Widget de dashboard |
-| `modules/ApmServiceHealth` | **APM service health** | Widget de dashboard |
+| Cómo se conectan tus servicios y cuál falla | Mapa de servicios en vivo | APM → Overview |
+| Tasa, errores y latencia por servicio y endpoint | Métricas RED con tendencia | APM → Overview |
+| Qué error se repite | Errores agrupados | APM → Overview |
+| Dónde se va el tiempo: código, base de datos u otro servicio | Origen de la lentitud | APM → Overview |
+| Qué viven los usuarios en el navegador | Apdex, Web Vitals y sesiones | APM → Overview y Real user monitoring |
+| Ver todo esto en un dashboard | Widgets **APM service map** y **APM service health** | Dashboards |
 
-Requisitos: Zabbix **8.0** (probado con los paquetes de 8.0.0rc3 y con las imágenes Docker de 8.0) y PHP 8.2 o
-superior. La fuente de datos APM (ClickHouse) se configura en el paso 3; hasta entonces los módulos se instalan bien,
-pero muestran "no configurada".
+Respetan los roles y los APM filter de Zabbix, y siguen el idioma del usuario (español o inglés).
 
-![Módulos habilitados](screenshots/install-modules-enabled.png)
+## Requisitos
 
-## 1. Copiar las carpetas al frontend
+- Zabbix **8.0** y PHP **8.2 o superior**, con acceso `sudo`.
+- Un token de API de un Super admin, si usas la opción por API: **User settings → API tokens**.
+- **ClickHouse y el Collector** para ver datos: [installation.es.md](installation.es.md), pasos 1 y 2. Sin ellos, los módulos se instalan pero muestran "no configurada".
 
-**Paquetes** (Ubuntu/Debian/RHEL; el frontend está en `/usr/share/zabbix/ui` o en `/usr/share/zabbix`):
+| Instalación de Zabbix | Carpeta de módulos habitual |
+|---|---|
+| Paquetes recientes | `/usr/share/zabbix/ui/modules` |
+| Paquetes anteriores o compilación | `/usr/share/zabbix/modules` |
+| Web root propio | `/var/www/html/zabbix/modules` |
+| Docker oficial | `/usr/share/zabbix/modules` (volumen, ver [abajo](#docker)) |
+
+No necesitas buscarla: el script del paso 1 la detecta.
+
+## Paso 1. Copiar los módulos
 
 ```sh
 git clone https://github.com/SimonLexRS/zabbix-apm-dashboard.git
 cd zabbix-apm-dashboard
-sudo ./scripts/install.sh            # encuentra el frontend; ZABBIX_UI=/ruta/al/frontend para otro directorio
+sudo ./scripts/install.sh
 ```
 
-El script comprueba la sintaxis PHP, respalda la versión anterior en `/var/backups/zabbix-apm-dashboard-<fecha>` y copia
-las tres carpetas con propietario root y permisos de solo lectura.
+Busca el frontend, comprueba la sintaxis PHP, respalda la versión anterior en `/var/backups/` y copia las carpetas. Si el frontend está en otra ruta, o hay varios:
 
-**Docker** (imágenes oficiales `zabbix/zabbix-web-*`, frontend en `/usr/share/zabbix`): monta las carpetas en solo
-lectura, como hace el laboratorio ([examples/lab/compose.yaml](../examples/lab/compose.yaml)):
+```sh
+sudo ZABBIX_UI=/ruta/al/frontend ./scripts/install.sh
+```
+
+✅ **Comprobación:** termina con `Installed in <frontend>/modules: ApmOverview ApmServiceHealth ApmServiceMap`.
+
+## Paso 2. Habilitarlos
+
+**Opción A, por API** (la más fácil de replicar). Usa la misma dirección con la que abres Zabbix:
+
+```sh
+export ZABBIX_URL=http://<tu-zabbix>
+read -rs ZABBIX_API_TOKEN && export ZABBIX_API_TOKEN   # pega el token y pulsa Enter
+python3 scripts/enable-modules.py
+```
+
+**Opción B, en la web:** **Administration → General → Modules → Scan directory**, selecciona los tres y pulsa **Enable**.
+
+![Módulos habilitados](screenshots/install-modules-enabled.png)
+
+✅ **Comprobación:** los tres aparecen como *Enabled* y el menú muestra **APM → Overview**.
+
+## Paso 3. Conectar ClickHouse
+
+**Administration → Data source → APM**: marca *Enable global data source*, completa los campos, pulsa **Test** y luego **Update**.
+
+| Campo | Valor |
+|---|---|
+| URL | ClickHouse visto desde el frontend, p. ej. `http://127.0.0.1:8123` |
+| Authentication | Usuario y contraseña de solo lectura (`zabbix_ro`) |
+| Database | `zabbix` |
+
+![Fuente de datos APM](screenshots/install-data-source.png)
+
+✅ **Comprobación:** **APM → Overview → Status** muestra la fuente de datos como OK.
+
+## Paso 4. Ver datos y dar acceso
+
+Conecta una aplicación con [add-application.es.md](add-application.es.md). Tendrás una pestaña por cada `service.namespace` en **APM → Overview**.
+
+![APM Overview](screenshots/install-apm-overview.png)
+
+Para agregar los widgets: edita un dashboard → **Add widget** → **APM service map** o **APM service health**.
+
+| Quiero | Dónde |
+|---|---|
+| Dar acceso a un usuario | **Users → User roles**: activa **APM → Traces** y los tres módulos en *Access to modules* |
+| Limitar un equipo a su aplicación | **Users → User groups → APM filter**: Key `service.namespace`, Value `<aplicación>` |
+
+## Docker
+
+Monta las carpetas en el servicio web y sigue desde el paso 2 ([ejemplo completo](../examples/lab/compose.yaml)):
 
 ```yaml
   zabbix-web:
@@ -40,98 +122,24 @@ lectura, como hace el laboratorio ([examples/lab/compose.yaml](../examples/lab/c
       - ./zabbix-apm-dashboard/modules/ApmServiceMap:/usr/share/zabbix/modules/ApmServiceMap:ro
 ```
 
-**Comprobación:** `ls <frontend>/modules` muestra `ApmOverview`, `ApmServiceHealth` y `ApmServiceMap`.
-
-## 2. Registrarlos y habilitarlos
-
-**Administration → General → Modules → Scan directory**. Los tres módulos aparecen como *Disabled*:
-
-![Scan directory](screenshots/install-modules-scan.png)
-
-Haz clic en **Disabled**, en la columna *Status* de cada uno (o selecciona los tres y pulsa **Enable**). Pasan a
-*Enabled*.
-
-Por API (Super admin), para automatizarlo: `module.create` con `id` = `apmoverview` / `apmservicehealth` /
-`apmservicemap`, `relative_path` = `modules/<Carpeta>` y `status` = 1. Es lo que hace
-[scripts/lab-bootstrap.py](../scripts/lab-bootstrap.py).
-
-## 3. Apuntar Zabbix a ClickHouse
-
-**Administration → Data source → APM**: marca *Enable global data source* y completa:
-
-| Campo | Valor |
-|---|---|
-| URL | URL HTTP de ClickHouse **tal como la ven el Zabbix server y el frontend**, p. ej. `http://127.0.0.1:8123`, o `http://clickhouse:8123` en Docker |
-| Authentication | Usuario y contraseña: el usuario de solo lectura ([installation.es.md](installation.es.md#1-clickhouse)) |
-| Database | `zabbix` |
-
-Pulsa **Test** y después **Update**.
-
-![Fuente de datos APM](screenshots/install-data-source.png)
-
-Las páginas APM nativas, estos módulos y los items Telemetry query del template usan esta fuente de datos. Por API:
-`settings.update` con `apm_global_db` (`status` 1, `url`, `db`, `username`, `password`).
-
-## 4. Abrirlo
-
-**APM → Overview**. La pestaña *Status* muestra la fuente de datos y si llegan trazas, logs y métricas. En cuanto
-lleguen datos, habrá una pestaña por aplicación (`service.namespace`).
-
-![APM Overview](screenshots/install-apm-overview.png)
-
-Quién puede verlo: los usuarios cuyo **rol** (**Users → User roles → <rol>**) permite las dos cosas:
-
-- el elemento de interfaz **APM → Traces** (*Access to UI elements*);
-- **APM Overview**, **APM service health** y **APM service map** (*Access to modules*). Los módulos nuevos se permiten
-  por defecto; revísalo si el rol está personalizado.
-
-Los Super admin siempre pueden.
-
-![Rol de usuario](screenshots/install-user-role.png)
-
-### Quién ve qué
-
-Los módulos aplican los mismos permisos de Zabbix que las páginas APM nativas, así que no hay nada que configurar en
-ellos:
-
-| Ajuste de Zabbix | Efecto en APM Overview y en los widgets |
-|---|---|
-| Rol, *Access to UI elements* → **APM → Traces** | La página, la entrada del menú y los widgets. Sin él, nada |
-| Rol → **APM → Logs** / **APM → Metrics** | Las cifras de logs y métricas (Status, Cómo funciona, Web Vitals) y los enlaces a las páginas Logs y Metrics. Sin ellos, esas partes se ocultan y no se consultan |
-| Grupo de usuarios → **APM filter** (atributos de recurso) | Solo la telemetría que coincide: pestañas de aplicación, todas las pestañas, los widgets (también con *Application* vacío) y los spans de las trazas lentas. Los filtros se suman (cualquiera de ellos), entre todos los grupos del usuario; *Category* limita un filtro a trazas, métricas o logs. Sin filtro = todo |
-| Grupo de usuarios → **Host permissions** sobre `apm-<namespace>` | El host de la aplicación, sus items y triggers (Cómo funciona solo muestra el host a quien puede leerlo) |
-| Tipo de usuario **Super admin** | Todo; los APM filters no se aplican, igual que en Zabbix |
-
-Para limitar un equipo a su aplicación: **Users → User groups → <grupo> → APM filter** → Key `service.namespace`, Value
-`<namespace>`, Category *All*. El mismo filtro limita las páginas nativas **APM → Traces / Logs / Metrics**.
-
-![APM filter de un grupo de usuarios](screenshots/install-apm-filter.png)
-
-## 5. Widgets en un dashboard
-
-Edita un dashboard → **Add widget** → tipo **APM service map** o **APM service health**. Ambos tienen un campo
-*Application* (`service.namespace`; vacío = todas), un filtro de servicio, umbrales y el periodo de tiempo.
-
-![Añadir el widget](screenshots/install-widget.png)
-
 ## Actualizar y desinstalar
 
-- **Actualizar**: `git pull` y ejecuta otra vez `sudo ./scripts/install.sh` (en Docker basta con `git pull`: las
-  carpetas montadas cambian en el sitio). Recarga la página. No hace falta volver a escanear, salvo que lo indiquen las
-  notas de la versión.
-- **Desinstalar**: deshabilita los tres módulos en **Administration → General → Modules** y ejecuta
-  `sudo ./scripts/install.sh --uninstall` (en Docker, quita los volúmenes del compose).
+```sh
+git pull && sudo ./scripts/install.sh       # actualizar y recargar la página
+sudo ./scripts/install.sh --uninstall       # desinstalar, tras deshabilitarlos en Modules
+```
 
 ## Problemas frecuentes
 
 | Síntoma | Solución |
 |---|---|
-| *Scan directory* no los muestra | Carpeta equivocada: deben estar directamente en `<frontend>/modules/<Carpeta>`, con su `manifest.json` dentro |
+| `Zabbix frontend not found` o varios frontends | Indica la ruta con `ZABBIX_UI` (paso 1) |
+| *Scan directory* no los muestra | Deben estar en `<frontend>/modules/<Carpeta>`, con su `manifest.json` |
 | "The APM data source is not configured" | Paso 3 |
-| "Cannot query the APM data source" | URL o usuario desde el punto de vista del Zabbix **server/frontend** (en Docker, el nombre del servicio, no `localhost`) |
-| No aparece *APM → Overview*, o "Access denied" | El rol no tiene **APM → Traces** o no tiene los módulos en *Access to modules* (paso 4) |
-| Un usuario ve menos aplicaciones que un administrador | APM filter de sus grupos de usuarios ([Quién ve qué](#quién-ve-qué)) |
-| Un widget dice que necesita APM Overview | Habilita también el módulo **APM Overview** |
+| "Cannot query the APM data source" | Revisa URL y usuario desde el frontend. En Docker, usa el nombre del servicio, no `localhost` |
+| El Collector no arranca: `Not enough privileges` | El usuario de escritura necesita `CREATE DATABASE`; aplica la versión actual de [clickhouse-users.sql](../examples/clickhouse-users.sql) |
+| No aparece **APM → Overview** o "Access denied" | Revisa el rol (paso 4) |
+| Un usuario ve menos aplicaciones | Revisa el APM filter de sus grupos |
+| Un widget pide APM Overview | Habilita también ese módulo |
 
-Más: [troubleshooting.md](troubleshooting.md). Siguiente: conectar una aplicación con
-[add-application.es.md](add-application.es.md).
+Más casos: [troubleshooting.md](troubleshooting.md).

@@ -13,12 +13,25 @@ MODULES="ApmOverview ApmServiceHealth ApmServiceMap"
 SRC="$(cd "$(dirname "$0")/.." && pwd)/modules"
 
 if [ -z "${ZABBIX_UI:-}" ]; then
-	for dir in /usr/share/zabbix/ui /usr/share/zabbix /var/www/html/zabbix; do
+	for dir in /usr/share/zabbix/ui /usr/share/zabbix /var/www/html/zabbix /var/www/zabbix /usr/share/webapps/zabbix; do
 		if [ -f "$dir/zabbix.php" ]; then
 			ZABBIX_UI=$dir
 			break
 		fi
 	done
+fi
+
+# Not in a usual path: look for it, but never guess between several frontends.
+if [ -z "${ZABBIX_UI:-}" ]; then
+	found="$(find /usr/share /usr/local /var/www /srv /opt -type f -name zabbix.php -not -path '*/modules/*' 2>/dev/null || true)"
+
+	if [ "$(printf '%s\n' "$found" | grep -c .)" -gt 1 ]; then
+		echo "Several Zabbix frontends found; set ZABBIX_UI to one of them:" >&2
+		printf '%s\n' "$found" | sed 's|/zabbix.php$||' >&2
+		exit 1
+	fi
+
+	[ -n "$found" ] && ZABBIX_UI="$(dirname "$found")"
 fi
 
 if [ -z "${ZABBIX_UI:-}" ] || [ ! -f "$ZABBIX_UI/zabbix.php" ]; then

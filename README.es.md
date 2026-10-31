@@ -82,7 +82,7 @@ Por aplicación, en detalle: [docs/add-application.es.md](docs/add-application.e
 
 Probado en Zabbix 8.0.0rc3, ClickHouse 26.9 y otelcol-contrib 0.162 con cuatro aplicaciones: el OpenTelemetry Demo
 (unos 20 servicios en 10 lenguajes), una API Go en producción, el ejemplo Go y una prueba de humo con `telemetrygen`.
-Los valores del template coinciden con ClickHouse para cada aplicación. Método, resultados y cómo repetirlo:
+Los valores del template coinciden con ClickHouse para cada aplicación. También se probó una instalación con Zabbix compilado desde fuente en Ubuntu 26.10 ARM64, con PHP 8.5, ClickHouse 26.10 y otelcol-contrib 0.164, usando una prueba de humo con `telemetrygen`. Método, resultados y cómo repetirlo:
 [docs/verification.es.md](docs/verification.es.md).
 
 ## Capturas
