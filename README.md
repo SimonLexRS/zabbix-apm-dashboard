@@ -2,6 +2,8 @@
 
 [Español](README.es.md)
 
+> **Installing it?** Start with the [step-by-step guide for Ubuntu](docs/ubuntu-step-by-step.md): from a server with only Zabbix 8 to APM, modules, a test store and RUM, with checked commands and the problems found.
+
 Application performance monitoring on **Zabbix 8.0** for any application instrumented with **OpenTelemetry**: frontend
 modules (service map, RED metrics per service and endpoint, grouped errors, user experience, origin of slowness, one tab
 per application), a template derived from Zabbix's official OpenTelemetry template (one host per application, with

@@ -2,6 +2,8 @@
 
 [English](installation.md)
 
+> **En Ubuntu, sigue la [guía paso a paso](guia-ubuntu-paso-a-paso.md).** Esta página es una referencia para otras distribuciones de máquinas.
+
 Una vez por Zabbix: almacenamiento, collector, fuente de datos, módulos y template. Después, cada aplicación se conecta
 con [add-application.es.md](add-application.es.md). Cada paso termina con una comprobación; no sigas hasta que pase.
 

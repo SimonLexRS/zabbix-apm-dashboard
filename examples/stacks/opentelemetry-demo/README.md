@@ -2,6 +2,8 @@
 
 [Español](README.es.md)
 
+> **From scratch, follow the [step-by-step guide](../../../docs/ubuntu-step-by-step.md).** This page only covers the store, and assumes APM already works.
+
 The [OpenTelemetry Demo](https://github.com/open-telemetry/opentelemetry-demo) (Astronomy Shop) is a store of about 20 services in Go, Java, .NET, Python, Node.js, Ruby, PHP, C++, Rust and Elixir, with a load generator. It shows APM with real traffic, without instrumenting anything.
 
 This guide deploys it with Docker **on the same server as Zabbix**. It keeps every application service and Kafka, and leaves out Jaeger, Grafana, Prometheus and OpenSearch, because Zabbix is the viewer.

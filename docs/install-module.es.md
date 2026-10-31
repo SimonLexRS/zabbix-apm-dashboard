@@ -2,6 +2,8 @@
 
 [English](install-module.md)
 
+> **En un server nuevo con Ubuntu, sigue la [guía paso a paso](guia-ubuntu-paso-a-paso.md).** Esta página solo cubre los módulos.
+
 Guía para cualquier Linux con Zabbix 8.0: paquetes, compilación desde fuente o Docker.
 
 ## Cómo funciona APM

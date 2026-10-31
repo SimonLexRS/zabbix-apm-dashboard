@@ -2,6 +2,8 @@
 
 [English](README.md)
 
+> **¿Vas a instalarlo?** Empieza por la [guía paso a paso en Ubuntu](docs/guia-ubuntu-paso-a-paso.md): de un server con solo Zabbix 8 a APM, módulos, tienda de prueba y RUM, con comandos comprobados y los problemas encontrados.
+
 Monitoreo del rendimiento de aplicaciones (APM) en **Zabbix 8.0** para cualquier aplicación instrumentada con
 **OpenTelemetry**. Incluye:
 - módulos de frontend: mapa de servicios, métricas RED por servicio y endpoint, errores agrupados, experiencia del
