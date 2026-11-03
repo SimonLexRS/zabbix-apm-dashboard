@@ -235,7 +235,9 @@ def discovery(dimension: bool) -> dict:
         'lld_macro_paths': [{'lld_macro': macro, 'path': path} for macro, path in sorted(paths.items())],
         'preprocessing': [
             {'type': 'JAVASCRIPT', 'parameters': [LLD_JS % ('false' if dimension else 'true')]},
-            {'type': 'DISCARD_UNCHANGED_HEARTBEAT', 'parameters': ['1h']},
+            # Discovery runs when the metrics or values change, and at least every 15 minutes, so that an update of
+            # the template reaches the discovered items soon.
+            {'type': 'DISCARD_UNCHANGED_HEARTBEAT', 'parameters': ['15m']},
         ],
         'overrides': overrides(),
     }
@@ -305,7 +307,7 @@ def build() -> dict:
         'template': NAME,
         'name': NAME,
         'description': (
-            'Version 1.1. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse '
+            'Version 1.2. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse '
             '(otel_metrics_sum, otel_metrics_gauge, otel_metrics_histogram), through the ClickHouse HTTP interface: '
             'orders by store, reservations by hotel, revenue, carts abandoned... whatever counters, gauges and '
             'histograms the application sends.\n\n'

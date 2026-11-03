@@ -57,6 +57,9 @@ python scripts/verify-app.py go-example
 
 ## Connect your own application to the lab
 
+> To run the example applications next to a real Zabbix instead of this lab, see
+> [examples/demo-apps](../examples/demo-apps/README.md).
+
 The collector of the lab listens on the host at `127.0.0.1:14317` (gRPC) and `127.0.0.1:14318` (HTTP):
 
 ```sh

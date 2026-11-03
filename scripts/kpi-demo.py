@@ -5,6 +5,8 @@
   python3 scripts/kpi-demo.py --app tienda-demo --endpoint http://<collector>:4318
   python3 scripts/kpi-demo.py --minutes 30         # stop after 30 minutes
 
+Always running, in Docker, next to the Go example: examples/demo-apps (compose.yaml).
+
 Two applications, each with its own service.namespace, as real ones would send them:
 
   tienda-demo (service tienda-api): shop.orders by shop.store and shop.channel, shop.revenue (USD) by shop.store,
@@ -24,6 +26,7 @@ import argparse
 import json
 import os
 import random
+import signal
 import sys
 import time
 import urllib.error
@@ -278,10 +281,17 @@ def send(endpoint: str, body: dict) -> None:
         response.read()
 
 
+def stop(signum, frame) -> None:
+    raise KeyboardInterrupt
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('--app', choices=['all', 'tienda-demo', 'hotel-demo'], default='all')
-    parser.add_argument('--endpoint', default='http://127.0.0.1:4318', help='OTLP/HTTP address of the collector')
+    # The environment variables do the same as the options (examples/demo-apps/compose.yaml uses them).
+    parser.add_argument('--app', choices=['all', 'tienda-demo', 'hotel-demo'],
+                        default=os.environ.get('KPI_DEMO_APP', 'all'), help='application to send (KPI_DEMO_APP)')
+    parser.add_argument('--endpoint', default=os.environ.get('OTLP_ENDPOINT', 'http://127.0.0.1:4318'),
+                        help='OTLP/HTTP address of the collector (OTLP_ENDPOINT)')
     parser.add_argument('--interval', type=float, default=15, help='seconds between exports (default 15)')
     parser.add_argument('--minutes', type=float, default=0, help='stop after this many minutes (default: never)')
     parser.add_argument('--seed', type=int, default=None, help='random seed, for repeatable runs')
@@ -294,6 +304,9 @@ def main() -> int:
     # Durations use the monotonic clock: a clock correction (NTP) must not add or lose events.
     start, start_ns = time.monotonic(), time.time_ns()
     last, last_report = start, -60.0
+
+    # docker stop sends SIGTERM: stop as with Ctrl+C.
+    signal.signal(signal.SIGTERM, stop)
 
     print(f'Sending {", ".join(a.namespace for a in apps)} to {base} every {args.interval:g} s. Ctrl+C stops.',
           flush=True)

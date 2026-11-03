@@ -64,6 +64,9 @@ Después crea el host de la aplicación con `python3 scripts/zabbix-apm-app.py a
 
 ## Ejecutar el ejemplo
 
+Siempre corriendo junto a tu Zabbix, con una tienda y una cadena de hoteles, e integrado paso a paso:
+[aplicaciones de ejemplo](../../demo-apps/README.es.md). A mano:
+
 ```sh
 docker build -t apm-go-example .
 docker run -d --name apm-go-example -p 8080:8080 \

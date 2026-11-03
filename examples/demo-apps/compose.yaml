@@ -1,0 +1,54 @@
+# Example applications of Zabbix APM, always running, sending to the Collector of Zabbix on this host
+# (see README.md):
+#   go-example   Go API with the OpenTelemetry SDK: traces, logs, runtime metrics, orders and revenue by store
+#   tienda-demo  store: orders, revenue, carts, order amounts and stock by store (scripts/kpi-demo.py)
+#   hotel-demo   hotel chain: reservations, cancellations, revenue, rooms and occupancy by hotel (scripts/kpi-demo.py)
+#
+#   cp .env.example .env && docker compose up -d --build
+#
+# The containers reach the Collector at host.docker.internal, the docker0 address of the host (172.17.0.1), where the
+# Collector listens with examples/stacks/opentelemetry-demo/otelcol-docker-bridge.yaml.
+
+x-collector: &collector
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  restart: unless-stopped
+  logging:
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  go-example:
+    <<: *collector
+    build: ../stacks/go
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://${ZABBIX_APM_HOST:-host.docker.internal}:4317
+      OTEL_SERVICE_NAME: go-example-api
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=go-example,deployment.environment.name=demo
+      SELF_LOAD: "1"
+    # Only on this machine: curl -X POST 'http://127.0.0.1:8090/order?store=Centro'
+    ports:
+      - 127.0.0.1:${GO_EXAMPLE_PORT:-8090}:8080
+
+  tienda-demo:
+    <<: *collector
+    image: python:3.14-slim
+    command: ["python3", "-I", "/app/kpi-demo.py"]
+    environment:
+      KPI_DEMO_APP: tienda-demo
+      OTLP_ENDPOINT: http://${ZABBIX_APM_HOST:-host.docker.internal}:4318
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../scripts/kpi-demo.py:/app/kpi-demo.py:ro
+
+  hotel-demo:
+    <<: *collector
+    image: python:3.14-slim
+    command: ["python3", "-I", "/app/kpi-demo.py"]
+    environment:
+      KPI_DEMO_APP: hotel-demo
+      OTLP_ENDPOINT: http://${ZABBIX_APM_HOST:-host.docker.internal}:4318
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../../scripts/kpi-demo.py:/app/kpi-demo.py:ro

@@ -12,7 +12,7 @@
                 "uuid": "5f1a1bf6a26c499eb996605ae33b52af",
                 "template": "APM business metrics by ClickHouse HTTP",
                 "name": "APM business metrics by ClickHouse HTTP",
-                "description": "Version 1.1. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse (otel_metrics_sum, otel_metrics_gauge, otel_metrics_histogram), through the ClickHouse HTTP interface: orders by store, reservations by hotel, revenue, carts abandoned... whatever counters, gauges and histograms the application sends.\n\nLink it to the host of the application (apm-<namespace>, see scripts/zabbix-apm-app.py add --kpi) and set {$APM.NAMESPACE}. Each metric gets an item with its value per minute and per hour, the totals of the last hour, last 24 hours, today and yesterday (from ClickHouse, complete from the first minute) and the value of its counter; each value of its attributes (store, hotel, currency...) gets the same items plus its share and rank of today, to compare them. Two queries (per minute and totals); everything else is dependent or calculated.\n\nDocs: https://github.com/SimonLexRS/zabbix-apm-dashboard/blob/main/docs/business-kpis.md",
+                "description": "Version 1.2. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse (otel_metrics_sum, otel_metrics_gauge, otel_metrics_histogram), through the ClickHouse HTTP interface: orders by store, reservations by hotel, revenue, carts abandoned... whatever counters, gauges and histograms the application sends.\n\nLink it to the host of the application (apm-<namespace>, see scripts/zabbix-apm-app.py add --kpi) and set {$APM.NAMESPACE}. Each metric gets an item with its value per minute and per hour, the totals of the last hour, last 24 hours, today and yesterday (from ClickHouse, complete from the first minute) and the value of its counter; each value of its attributes (store, hotel, currency...) gets the same items plus its share and rank of today, to compare them. Two queries (per minute and totals); everything else is dependent or calculated.\n\nDocs: https://github.com/SimonLexRS/zabbix-apm-dashboard/blob/main/docs/business-kpis.md",
                 "groups": [
                     {
                         "name": "Templates/Applications"
@@ -722,7 +722,7 @@
                             {
                                 "type": "DISCARD_UNCHANGED_HEARTBEAT",
                                 "parameters": [
-                                    "1h"
+                                    "15m"
                                 ]
                             }
                         ],
@@ -1500,7 +1500,7 @@
                             {
                                 "type": "DISCARD_UNCHANGED_HEARTBEAT",
                                 "parameters": [
-                                    "1h"
+                                    "15m"
                                 ]
                             }
                         ],

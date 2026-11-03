@@ -171,8 +171,9 @@ def add(api: Api, namespace: str, name: str | None, timeshift: str | None = None
 
 # Name of a KPI item: "KPI <metric> [<key>=<value>] (<service>): <period>" (template "APM business metrics").
 KPI_NAME = re.compile(r'^KPI (?P<metric>\S+)(?: (?P<key>[^ =]+)=(?P<value>.*))? \((?P<service>[^()]+)\): (?P<period>.+)$')
-AGGREGATE_LAST = 7
+AGGREGATE_LAST, AGGREGATE_SUM = 7, 5
 TOPITEMS_VERTICAL = 1
+ORDER_BY_VALUE, ORDER_BY_NAME = 3, 2
 
 
 def field(name: str, value, kind: int = 1) -> dict:
@@ -180,35 +181,53 @@ def field(name: str, value, kind: int = 1) -> dict:
     return {'type': kind, 'name': name, 'value': value}
 
 
-def kpi_widgets(host: str, hostid: str, metric: str, key: str, current: bool, y: int) -> list:
-    """One row of the comparison dashboard: the values of one attribute of one metric."""
+def top_items(hostid: str, patterns: list, order: int, limit: int = 20) -> list:
+    """Fields of a "Top items" widget: one row per item matching the patterns, ordered by value or by name."""
+    fields = [field('hostids.0', hostid, 3), field('layout', TOPITEMS_VERTICAL, 0),
+              field('item_ordering_order_by', order, 0), field('item_ordering_limit', limit, 0)]
+
+    for i, pattern in enumerate(patterns):
+        fields.append(field(f'columns.{i}.items.0', pattern))
+
+    return fields
+
+
+def kpi_widgets(host_name: str, hostid: str, metric: str, key: str, current: bool, y: int) -> list:
+    """One row of the comparison dashboard: the values of one attribute of one metric (e.g. orders by store).
+    Patterns of widgets match the visible host name."""
     base = f'KPI {metric} {key}=*'
     period = 'current' if current else 'today'
     title = f'{metric} by {key}'
     pie = [
-        field('ds.0.dataset_type', 1, 0), field('ds.0.hosts.0', host), field('ds.0.items.0', f'{base}: {period}'),
+        field('ds.0.dataset_type', 1, 0), field('ds.0.hosts.0', host_name), field('ds.0.items.0', f'{base}: {period}'),
         field('ds.0.aggregate_function', AGGREGATE_LAST, 0), field('ds.0.dataset_aggregation', 0, 0),
         field('legend_value', 1, 0), field('total_show', 1, 0)
     ]
-    columns = [period] if current else ['today', 'share today', 'rank today', 'yesterday']
-    top = [field('hostids.0', hostid, 3), field('layout', TOPITEMS_VERTICAL, 0)]
+    # The values per minute added up per hour: bars of each store or hotel along the last 7 days (current values:
+    # the line of the last 24 hours).
+    graph = [field('ds.0.dataset_type', 1, 0), field('ds.0.hosts.0', host_name)]
 
-    for i, label in enumerate(columns):
-        top.append(field(f'columns.{i}.items.0', f'{base}: {label}'))
+    if current:
+        graph += [field('ds.0.items.0', f'{base}: current'), field('time_period.from', 'now-24h')]
+    else:
+        graph += [field('ds.0.items.0', f'{base}: per minute'), field('ds.0.aggregate_function', AGGREGATE_SUM, 0),
+                  field('ds.0.aggregate_interval', '1h'), field('time_period.from', 'now-7d')]
 
-    graph = [
-        field('ds.0.dataset_type', 1, 0), field('ds.0.hosts.0', host),
-        field('ds.0.items.0', f'{base}: {"current" if current else "per hour"}'),
-        field('time_period.from', 'now-24h' if current else 'now-7d'), field('time_period.to', 'now')
+    graph.append(field('time_period.to', 'now'))
+    widgets = [
+        {'type': 'piechart', 'name': f'{title}: {period}', 'x': 0, 'y': y, 'width': 16, 'height': 6, 'fields': pie},
+        {'type': 'topitems', 'name': f'{title}: {period}, largest first', 'x': 16, 'y': y, 'width': 18, 'height': 6,
+         'fields': top_items(hostid, [f'{base}: {period}'], ORDER_BY_VALUE)},
     ]
 
-    return [
-        {'type': 'piechart', 'name': f'{title}: {period}', 'x': 0, 'y': y, 'width': 18, 'height': 6, 'fields': pie},
-        {'type': 'topitems', 'name': f'{title}: ' + ('current' if current else 'today, share, rank, yesterday'),
-         'x': 18, 'y': y, 'width': 22, 'height': 6, 'fields': top},
-        {'type': 'svggraph', 'name': f'{title}: ' + ('last 24 hours' if current else 'per hour, last 7 days'),
-         'x': 40, 'y': y, 'width': 32, 'height': 6, 'fields': graph},
-    ]
+    if not current:
+        widgets.append({'type': 'topitems', 'name': f'{title}: share of today, %', 'x': 34, 'y': y, 'width': 14,
+                        'height': 6, 'fields': top_items(hostid, [f'{base}: share today'], ORDER_BY_VALUE)})
+
+    widgets.append({'type': 'svggraph', 'name': f'{title}: ' + ('last 24 hours' if current else 'per hour, last 7 days'),
+                    'x': 34 if current else 48, 'y': y, 'width': 38 if current else 24, 'height': 6, 'fields': graph})
+
+    return widgets
 
 
 def kpi_dashboard(api: Api, namespace: str) -> None:
@@ -218,7 +237,7 @@ def kpi_dashboard(api: Api, namespace: str) -> None:
     if not hosts:
         raise SystemExit(f'no host {host}: run "add {namespace} --kpi" first')
 
-    hostid = hosts[0]['hostid']
+    hostid, host_name = hosts[0]['hostid'], hosts[0]['name']
     items = api.call('item.get', {'hostids': hostid, 'output': ['name'], 'selectTags': ['tag', 'value'],
                                   'search': {'name': 'KPI '}, 'startSearch': True})
     metrics = {}
@@ -243,18 +262,14 @@ def kpi_dashboard(api: Api, namespace: str) -> None:
                          'minutes')
 
     # First the totals of every metric, then one row per attribute: sales first, availability after.
-    summary = [field('hostids.0', hostid, 3), field('layout', TOPITEMS_VERTICAL, 0)]
-
-    for i, name in enumerate(sorted(n for m in metrics.values() for n in m['totals'])):
-        summary.append(field(f'columns.{i}.items.0', name))
-
-    widgets = [{'type': 'topitems', 'name': 'Totals: today, current and counter', 'x': 0, 'y': 0, 'width': 72,
-                'height': 5, 'fields': summary}]
+    widgets = [{'type': 'topitems', 'name': 'Totals: today, current value and counter of each metric', 'x': 0, 'y': 0,
+                'width': 72, 'height': 5, 'fields': top_items(hostid, sorted(n for m in metrics.values()
+                                                                           for n in m['totals']), ORDER_BY_NAME, 50)}]
     y = 5
 
     for metric, entry in sorted(metrics.items(), key=lambda m: (m[1]['current'], m[0])):
         for key in sorted(entry['keys']):
-            widgets += kpi_widgets(host, hostid, metric, key, entry['current'], y)
+            widgets += kpi_widgets(host_name, hostid, metric, key, entry['current'], y)
             y += 6
 
     name = f'KPIs {namespace}'

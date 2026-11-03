@@ -91,6 +91,7 @@ python3 scripts/verify-app.py shop              # all checks passed
 | Install it across machines or on another distribution | [Reference installation](docs/installation.md) |
 | Install only the modules | [Modules](docs/install-module.md) |
 | Connect my application | [Add an application](docs/add-application.md) and [examples per stack](#examples-per-stack) |
+| See it with example applications (Go API, store, hotels) | [Example applications](examples/demo-apps/README.md), in Docker |
 | Monitor my users' browsers | [RUM: implementation and testing](docs/rum.md) |
 | Follow sales, reservations or any business number | [Business KPIs](docs/business-kpis.md) |
 
@@ -146,6 +147,7 @@ The service filter takes a substring (`checkout`), a wildcard (`demo-*`) or an e
 
 ### Examples per stack
 
+- [**Example applications**](examples/demo-apps/README.md): a Go API, a store and a hotel chain in Docker, with the commands to integrate them with Zabbix (hosts, KPIs, dashboards) and what you see
 - [Go](examples/stacks/go/README.md), runnable
 - [Java, Python, Node.js, .NET and Kubernetes](examples/stacks/zero-code/README.md), without changing code
 - [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.md): a store of about 20 services in 10 languages

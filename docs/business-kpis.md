@@ -241,6 +241,7 @@ the rooms, rooms free, rooms occupied and occupancy of each hotel), with a serve
 
 ```sh
 python3 scripts/kpi-demo.py                               # to http://127.0.0.1:4318, Ctrl+C stops
+# or always running, in Docker, with the Go example: examples/demo-apps
 python3 scripts/zabbix-apm-app.py add tienda-demo --kpi
 python3 scripts/zabbix-apm-app.py add hotel-demo --kpi
 python3 scripts/zabbix-apm-app.py kpi-dashboard tienda-demo      # after 2-3 minutes

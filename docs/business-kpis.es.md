@@ -248,6 +248,7 @@ arrancó, para compararlos con Zabbix:
 
 ```sh
 python3 scripts/kpi-demo.py                               # a http://127.0.0.1:4318, Ctrl+C lo detiene
+# o siempre corriendo, en Docker, con el ejemplo en Go: examples/demo-apps
 python3 scripts/zabbix-apm-app.py add tienda-demo --kpi
 python3 scripts/zabbix-apm-app.py add hotel-demo --kpi
 python3 scripts/zabbix-apm-app.py kpi-dashboard tienda-demo      # a los 2-3 minutos

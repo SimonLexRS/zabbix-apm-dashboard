@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.3.1
+
+- **Example applications** ([examples/demo-apps](examples/demo-apps/README.md)): the Go example, the store and the hotel
+  chain in one `compose.yaml`, sending to the Collector of Zabbix on the host and restarting with it, with a guide of
+  what each one shows, how to integrate them (hosts, KPIs, dashboards), what you see, how to compare the figures and
+  how to take each part to your own application.
+- `verify-app.py <app> --kpi` checks the business KPIs: template and macro, both queries answering, items discovered
+  and `today` of every metric and value against ClickHouse. It no longer fails on hosts with secret macros.
+- `kpi-dashboard`: the widgets match the visible host name (the pie charts showed *No data*), the stores or hotels are
+  ordered from largest to smallest with their share in a widget of their own, and the trend per hour adds up the
+  values per minute, so it has data from the first hour.
+- Template 1.2: discovery runs at least every 15 minutes (it was 1 hour), so an update of the template reaches the
+  discovered items soon.
+- `kpi-demo.py` takes `KPI_DEMO_APP` and `OTLP_ENDPOINT` from the environment and stops cleanly with `docker stop`.
+
 ## 2.3.0
 
 - **Totals to compare**, from ClickHouse, so they are complete as soon as the items exist (before, `today` and
