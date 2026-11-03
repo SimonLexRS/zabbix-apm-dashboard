@@ -17,6 +17,12 @@ otherwise they must exist as global macros ({$CH.URL}, {$CH.USER}, {$CH.PASSWORD
 
   export CH_URL=http://127.0.0.1:8123/ CH_USER=zabbix_ro CH_PASSWORD=...
   python3 scripts/zabbix-apm-app.py add flowspock --kpi
+
+"kpi-dashboard" creates or updates the dashboard "KPIs <namespace>" to compare the values of each attribute (stores,
+hotels...): today by value, its share and rank, the trend per hour, and the current levels (availability, stock). Run it
+again when the application sends a new metric or attribute:
+
+  python3 scripts/zabbix-apm-app.py kpi-dashboard flowspock
 """
 
 import argparse
@@ -163,6 +169,106 @@ def add(api: Api, namespace: str, name: str | None, timeshift: str | None = None
                 ' Macros), or run again with ' + ', '.join(v for v, m in CH_MACROS.items() if m in missing) + '.')
 
 
+# Name of a KPI item: "KPI <metric> [<key>=<value>] (<service>): <period>" (template "APM business metrics").
+KPI_NAME = re.compile(r'^KPI (?P<metric>\S+)(?: (?P<key>[^ =]+)=(?P<value>.*))? \((?P<service>[^()]+)\): (?P<period>.+)$')
+AGGREGATE_LAST = 7
+TOPITEMS_VERTICAL = 1
+
+
+def field(name: str, value, kind: int = 1) -> dict:
+    """A widget field: kind 0 = integer, 1 = string, 3 = host."""
+    return {'type': kind, 'name': name, 'value': value}
+
+
+def kpi_widgets(host: str, hostid: str, metric: str, key: str, current: bool, y: int) -> list:
+    """One row of the comparison dashboard: the values of one attribute of one metric."""
+    base = f'KPI {metric} {key}=*'
+    period = 'current' if current else 'today'
+    title = f'{metric} by {key}'
+    pie = [
+        field('ds.0.dataset_type', 1, 0), field('ds.0.hosts.0', host), field('ds.0.items.0', f'{base}: {period}'),
+        field('ds.0.aggregate_function', AGGREGATE_LAST, 0), field('ds.0.dataset_aggregation', 0, 0),
+        field('legend_value', 1, 0), field('total_show', 1, 0)
+    ]
+    columns = [period] if current else ['today', 'share today', 'rank today', 'yesterday']
+    top = [field('hostids.0', hostid, 3), field('layout', TOPITEMS_VERTICAL, 0)]
+
+    for i, label in enumerate(columns):
+        top.append(field(f'columns.{i}.items.0', f'{base}: {label}'))
+
+    graph = [
+        field('ds.0.dataset_type', 1, 0), field('ds.0.hosts.0', host),
+        field('ds.0.items.0', f'{base}: {"current" if current else "per hour"}'),
+        field('time_period.from', 'now-24h' if current else 'now-7d'), field('time_period.to', 'now')
+    ]
+
+    return [
+        {'type': 'piechart', 'name': f'{title}: {period}', 'x': 0, 'y': y, 'width': 18, 'height': 6, 'fields': pie},
+        {'type': 'topitems', 'name': f'{title}: ' + ('current' if current else 'today, share, rank, yesterday'),
+         'x': 18, 'y': y, 'width': 22, 'height': 6, 'fields': top},
+        {'type': 'svggraph', 'name': f'{title}: ' + ('last 24 hours' if current else 'per hour, last 7 days'),
+         'x': 40, 'y': y, 'width': 32, 'height': 6, 'fields': graph},
+    ]
+
+
+def kpi_dashboard(api: Api, namespace: str) -> None:
+    host = 'apm-' + re.sub(r'[^0-9A-Za-z._ -]', '-', namespace)
+    hosts = api.call('host.get', {'output': ['hostid', 'name'], 'filter': {'host': host}})
+
+    if not hosts:
+        raise SystemExit(f'no host {host}: run "add {namespace} --kpi" first')
+
+    hostid = hosts[0]['hostid']
+    items = api.call('item.get', {'hostids': hostid, 'output': ['name'], 'selectTags': ['tag', 'value'],
+                                  'search': {'name': 'KPI '}, 'startSearch': True})
+    metrics = {}
+
+    for item in items:
+        match = KPI_NAME.match(item['name'])
+
+        if not match:
+            continue
+
+        kind = next((t['value'] for t in item['tags'] if t['tag'] == 'kind'), '')
+        entry = metrics.setdefault(match['metric'], {'current': kind in ('gauge', 'updown'), 'keys': set(),
+                                                     'totals': set()})
+
+        if match['key']:
+            entry['keys'].add(match['key'])
+        elif match['period'] in ('today', 'current', 'total (counter)'):
+            entry['totals'].add(item['name'])
+
+    if not metrics:
+        raise SystemExit(f'{host} has no KPI items yet: link the template with "add {namespace} --kpi" and wait 2-3 '
+                         'minutes')
+
+    # First the totals of every metric, then one row per attribute: sales first, availability after.
+    summary = [field('hostids.0', hostid, 3), field('layout', TOPITEMS_VERTICAL, 0)]
+
+    for i, name in enumerate(sorted(n for m in metrics.values() for n in m['totals'])):
+        summary.append(field(f'columns.{i}.items.0', name))
+
+    widgets = [{'type': 'topitems', 'name': 'Totals: today, current and counter', 'x': 0, 'y': 0, 'width': 72,
+                'height': 5, 'fields': summary}]
+    y = 5
+
+    for metric, entry in sorted(metrics.items(), key=lambda m: (m[1]['current'], m[0])):
+        for key in sorted(entry['keys']):
+            widgets += kpi_widgets(host, hostid, metric, key, entry['current'], y)
+            y += 6
+
+    name = f'KPIs {namespace}'
+    dashboard = {'name': name, 'display_period': 60, 'auto_start': 0, 'pages': [{'widgets': widgets}]}
+    existing = api.call('dashboard.get', {'output': ['dashboardid'], 'filter': {'name': name}})
+
+    if existing:
+        api.call('dashboard.update', {'dashboardid': existing[0]['dashboardid'], **dashboard})
+        print(f'updated dashboard "{name}": {len(widgets)} widgets')
+    else:
+        api.call('dashboard.create', dashboard)
+        print(f'created dashboard "{name}": {len(widgets)} widgets (private: share it in Dashboards -> Sharing)')
+
+
 def list_apps(api: Api) -> None:
     templates = api.call('template.get', {'output': ['templateid'], 'filter': {'host': TEMPLATE_NAME}})
 
@@ -196,6 +302,8 @@ def main() -> int:
     add_parser.add_argument('--kpi', action='store_true',
         help='also discover the business metrics of the application (orders, reservations...)')
     commands.add_parser('list', help='applications monitored with the template')
+    dashboard_parser = commands.add_parser('kpi-dashboard', help='dashboard to compare the business KPIs of an application')
+    dashboard_parser.add_argument('namespace', help='service.namespace of the application')
     args = parser.parse_args()
 
     url = os.environ.get('ZABBIX_URL')
@@ -214,6 +322,11 @@ def main() -> int:
         if not args.namespace.strip():
             parser.error('the namespace cannot be empty')
         add(api, args.namespace.strip(), args.name, args.timeshift, args.kpi)
+
+        if args.kpi:
+            print(f'  in 2-3 minutes: python3 scripts/zabbix-apm-app.py kpi-dashboard {args.namespace.strip()}')
+    elif args.command == 'kpi-dashboard':
+        kpi_dashboard(api, args.namespace.strip())
     else:
         list_apps(api)
 

@@ -102,13 +102,17 @@ class BusinessMetrics {
 		return 'WITH toDateTime({time_from:Int32}) AS t0, toDateTime({time_till:Int32}) AS t1,'.
 			' t0-{lookback:UInt32} AS tw, '.self::CLEAN.
 			' SELECT service, metric, kind, any(unit) AS unit, any(description) AS description,'.
-				' dim.1 AS dim_key, dim.2 AS dim_value, sum(value) AS value, sum(total) AS sum,'.
+				' dim.1 AS dim_key, dim.2 AS dim_value,'.
+				// A percentage (e.g. occupancy) is averaged over the instances that reported, not added up.
+				' if(kind IN (\'gauge\',\'updown\') AND unit=\'%\', if(countIf(fresh)>0, avgIf(val, fresh), 0),'.
+					' sum(val)) AS value, sum(total) AS sum,'.
 				' toUnixTimestamp(max(last)) AS last'.
 			' FROM ('.
 				'SELECT service, metric, kind, unit, description, attrs,'.
 					// Current values: only instances that reported in the last STALE seconds of the period.
-					' if(kind IN (\'gauge\',\'updown\'), if(ts[-1]>=t1-'.self::STALE.', vs[-1], 0),'.
-						' arraySum(arrayMap((d, t) -> if(t>=t0, d, 0), dv, ts))) AS value,'.
+					' ts[-1]>=t1-'.self::STALE.' AS fresh,'.
+					' if(kind IN (\'gauge\',\'updown\'), if(fresh, vs[-1], 0),'.
+						' arraySum(arrayMap((d, t) -> if(t>=t0, d, 0), dv, ts))) AS val,'.
 					' if(kind=\'histogram\', arraySum(arrayMap((d, t) -> if(t>=t0, d, 0), ds, ts)), 0) AS total,'.
 					' ts[-1] AS last'.
 				' FROM ('.self::series($access, $service).')'.

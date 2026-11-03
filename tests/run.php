@@ -270,7 +270,23 @@ namespace Modules\ApmOverview\Includes {
 		['user.id', 'session_id', 'client.address', 'shop.store', 'hotel.name', 'demo.payment.currency']
 	), [true, true, true, false, false, false]);
 
+	check('kpi totals master', array_column($kpi_template['items'], 'key'),
+		['apm.kpi.get', 'apm.kpi.totals.get', 'apm.kpi.rows']
+	);
+	check('kpi time zone macro', $kpi_macros['{$APM.KPI.TIMEZONE}'] ?? null, 'UTC');
 	$rules = array_column($kpi_template['discovery_rules'], null, 'key');
+	$prototype_keys = static fn(string $rule): array => array_map(
+		static fn(array $item): string => strstr($item['key'], '[', true), $rules[$rule]['item_prototypes']
+	);
+	check('kpi share and rank only per value', [
+		array_intersect(['apm.kpi.share.today', 'apm.kpi.rank.today'], $prototype_keys('apm.kpi.discovery')),
+		array_values(array_intersect(['apm.kpi.share.today', 'apm.kpi.rank.today'],
+			$prototype_keys('apm.kpi.dimension.discovery')
+		))
+	], [[], ['apm.kpi.share.today', 'apm.kpi.rank.today']]);
+	$totals_master = array_column($rules['apm.kpi.discovery']['item_prototypes'], null, 'key')
+		['apm.kpi.today["{#SERVICE}","{#METRIC}"]']['master_item']['key'] ?? null;
+	check('kpi today from ClickHouse', $totals_master, 'apm.kpi.totals.get');
 	check('kpi discovery rules', array_keys($rules), ['apm.kpi.discovery', 'apm.kpi.dimension.discovery']);
 	check('kpi per-value item keys', array_column($rules['apm.kpi.dimension.discovery']['item_prototypes'], 'key')[0],
 		'apm.kpi.value["{#SERVICE}","{#METRIC}","{#DIM}","{#DIMVALUE}"]'

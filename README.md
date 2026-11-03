@@ -50,7 +50,7 @@ Modules, templates and guides that turn Zabbix 8.0 into an **application perform
 | Which error keeps repeating? | **Grouped errors**, with counts, last seen and trace | APM → Overview |
 | Where does the time go? | **Origin of slowness:** code, database or other services, with waterfalls and expensive queries | APM → Overview |
 | What do my users experience? | **RUM:** sessions down to the backend, page loads, resources and Core Web Vitals | APM → Real user monitoring |
-| How many orders did each store have today? | **Business KPIs:** the counters of your application (orders, reservations, payments) by attribute, as Zabbix items the assistant can read | APM → Overview, host `apm-<application>` |
+| How many orders did each store have today, and how many rooms are free? | **Business KPIs:** the counters and levels of your application (orders, reservations, availability) by attribute, with complete totals, share and rank, a comparison dashboard and items the assistant can read | APM → Overview, host `apm-<application>` |
 | Can I see it next to my monitoring? | **Widgets** APM service map and APM service health | Dashboards |
 | Does it alert me when something goes wrong? | **Template** with items, triggers and a dashboard per application | Host `apm-<application>` |
 | How do I connect my application? | **Interactive guide per language**, with live checks | APM → Overview → How it works |
@@ -142,7 +142,7 @@ The service filter takes a substring (`checkout`), a wildcard (`demo-*`) or an e
 | `scripts/zabbix-apm-app.py` | Onboards an application through the API: template, host and macros. Idempotent |
 | `scripts/verify-app.py` | Checks an application end to end and compares Zabbix with ClickHouse |
 | `scripts/test-rum.py` | Checks the browser data and can send synthetic Web Vitals |
-| `scripts/kpi-demo.py` | Sends a store and a hotel chain with business metrics, to try the KPIs |
+| `scripts/kpi-demo.py` | Sends a store and a hotel chain with business metrics and availability, to try the KPIs |
 
 ### Examples per stack
 

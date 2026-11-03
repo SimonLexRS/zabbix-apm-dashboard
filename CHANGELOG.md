@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.3.0
+
+- **Totals to compare**, from ClickHouse, so they are complete as soon as the items exist (before, `today` and
+  `yesterday` added up the history of Zabbix and only counted since the item was created): `last hour`, `last 24 hours`,
+  `today`, `yesterday` (with 400 days of history: one total per day) and, for histograms, the sum and average of today
+  and yesterday. New master item `apm.kpi.totals.get` (every `{$APM.KPI.TOTALS.INTERVAL}`, 2m); days in
+  `{$APM.KPI.TIMEZONE}`. The items keep their keys, so their history stays.
+- `total (counter)`: the value the counter of the application reports, to compare with the application itself.
+- `share today` and `rank today` for each value of an attribute: the % and the position of each store or hotel.
+- `last 7 days`, from the `per hour` values.
+- **Availability:** the gauges (rooms of each hotel, rooms free, occupancy, stock, products out of stock) are discovered
+  like the rest, as current values; a percentage is averaged in the total of the metric instead of added up. The guide
+  explains how to send them, and `kpi-demo.py` sends them for its hotels and stores.
+- `zabbix-apm-app.py kpi-dashboard <app>`: dashboard to compare the values of each attribute (pie chart of today, top
+  items with today, share, rank and yesterday, graph per hour), and the current levels.
+- The Business KPIs tab shows the share of each value next to it.
+
 ## 2.2.0
 
 - **Business KPIs:** the business metrics that an application sends over OpenTelemetry (orders by store, reservations by

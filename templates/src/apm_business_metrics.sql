@@ -5,7 +5,7 @@
 -- 'Centro'), for the last closed minute [t0, t1):
 --   counter    increase in the minute (cumulative series: differences between points; delta series: their sum)
 --   updown     current value (up-down counter, e.g. rooms occupied), of the instances seen in the last 5 minutes
---   gauge      current value, of the instances seen in the last 5 minutes
+--   gauge      current value, of the instances seen in the last 5 minutes (a % is averaged, not added up)
 --   histogram  increase of the count (value, count) and of the sum (sum) in the minute
 -- Units are those of the metric (USD, s, By); annotations such as {order} and the unit 1 are dropped, the metric name
 -- already says what is counted. Instances and attribute sets are added up. Series seen in the last {window} minutes return 0 when quiet, so the
@@ -18,7 +18,9 @@ WITH
     (x -> replaceRegexpAll(x, '[''"\\\\]', '')) AS clean
 SELECT
     service, metric, kind, any(unit) AS unit, any(description) AS description, dim.1 AS dim_key, dim.2 AS dim_value,
-    round(sum(value), 6) AS value, round(sum(cnt), 6) AS count, round(sum(total), 6) AS sum, round(sum(win), 6) AS window_total
+    -- A percentage (e.g. occupancy) is averaged over the instances that reported, not added up.
+    round(if(kind IN ('gauge', 'updown') AND unit = '%', if(countIf(fresh) > 0, avgIf(val, fresh), 0), sum(val)), 6)
+        AS value, round(sum(cnt), 6) AS count, round(sum(total), 6) AS sum, round(sum(win), 6) AS window_total
 FROM
 (
     SELECT
@@ -36,7 +38,8 @@ FROM
         arraySum(arrayMap((d, t) -> if(t >= t0, d, 0), if(delta, vs, dv), ts)) AS inc_v,
         arraySum(arrayMap((d, t) -> if(t >= t0, d, 0), if(delta, ss, ds), ts)) AS inc_s,
         -- Current values count only for instances that reported in the last 5 minutes (not one that stopped).
-        if(kind IN ('gauge', 'updown'), if(ts[-1] >= t1 - 300, vs[-1], 0), inc_v) AS value,
+        ts[-1] >= t1 - 300 AS fresh,
+        if(kind IN ('gauge', 'updown'), if(fresh, vs[-1], 0), inc_v) AS val,
         if(kind = 'histogram', inc_v, 0) AS cnt,
         if(kind = 'histogram', inc_s, 0) AS total,
         if(kind IN ('gauge', 'updown'), arrayMax(vs), arraySum(if(delta, vs, dv))) AS win

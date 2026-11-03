@@ -50,7 +50,7 @@ Módulos, plantillas y guías que convierten a Zabbix 8.0 en una plataforma de *
 | ¿Qué error se repite? | **Errores agrupados**, con veces, última aparición y traza | APM → Overview |
 | ¿Dónde se pierde el tiempo? | **Origen de la lentitud:** código, base de datos u otros servicios, con cascadas y consultas costosas | APM → Overview |
 | ¿Qué viven mis usuarios? | **RUM:** sesiones hasta el backend, cargas de página, recursos y Core Web Vitals | APM → Real user monitoring |
-| ¿Cuántos pedidos tuvo hoy cada tienda? | **KPIs de negocio:** los contadores de tu aplicación (pedidos, reservas, pagos) por atributo, como ítems de Zabbix que el asistente puede leer | APM → Overview, host `apm-<aplicación>` |
+| ¿Cuántos pedidos tuvo hoy cada tienda y cuántas habitaciones quedan libres? | **KPIs de negocio:** los contadores y niveles de tu aplicación (pedidos, reservas, disponibilidad) por atributo, con totales completos, participación y ranking, un dashboard de comparación e ítems que el asistente puede leer | APM → Overview, host `apm-<aplicación>` |
 | ¿Puedo verlo junto a mi monitoreo? | **Widgets** APM service map y APM service health | Dashboards |
 | ¿Me avisa si algo va mal? | **Plantilla** con items, triggers y dashboard por aplicación | Host `apm-<aplicación>` |
 | ¿Cómo conecto mi aplicación? | **Guía interactiva por lenguaje**, con comprobaciones en vivo | APM → Overview → Cómo funciona |
@@ -142,7 +142,7 @@ El filtro de servicio acepta un texto contenido (`checkout`), un comodín (`demo
 | `scripts/zabbix-apm-app.py` | Da de alta una aplicación por API: plantilla, host y macros. Idempotente |
 | `scripts/verify-app.py` | Comprueba una aplicación de punta a punta y compara Zabbix con ClickHouse |
 | `scripts/test-rum.py` | Comprueba los datos del navegador y puede enviar Web Vitals sintéticos |
-| `scripts/kpi-demo.py` | Envía una tienda y una cadena de hoteles con métricas de negocio, para probar los KPIs |
+| `scripts/kpi-demo.py` | Envía una tienda y una cadena de hoteles con métricas de negocio y disponibilidad, para probar los KPIs |
 
 ### Ejemplos por stack
 

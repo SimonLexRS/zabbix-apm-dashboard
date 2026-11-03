@@ -17,11 +17,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SQL = ROOT / 'templates/src/apm_business_metrics.sql'
+TOTALS_SQL = ROOT / 'templates/src/apm_business_totals.sql'
 TARGET = ROOT / 'templates/apm_business_metrics_clickhouse_http.json'
 
 NAME = 'APM business metrics by ClickHouse HTTP'
 GROUP = 'Templates/Applications'
 MASTER = 'apm.kpi.get'
+TOTALS = 'apm.kpi.totals.get'
 # Fixed namespace for the UUIDs, so the output only changes when the definitions do.
 UUID_NAMESPACE = uuid.UUID('5b0c8f0e-2f8a-4b8e-9a43-1d2f7c6e9b21')
 
@@ -40,6 +42,10 @@ MACROS = [
     ('{$APM.KPI.DISCOVERY.WINDOW}', '60', 'Minutes: metrics and attribute values seen within this window are '
         'discovered, and report 0 in the minutes without activity.'),
     ('{$APM.KPI.LIMIT}', '1000', 'Maximum number of rows (metrics plus attribute values) returned by the query.'),
+    ('{$APM.KPI.TIMEZONE}', 'UTC', 'Time zone of the days of "today" and "yesterday", e.g. America/La_Paz (IANA '
+        'name, as ClickHouse knows it).'),
+    ('{$APM.KPI.TOTALS.INTERVAL}', '2m', 'Update interval of the totals (last hour, last 24 hours, today, yesterday, '
+        'total of the counter, share and rank), read from ClickHouse.'),
     ('{$APM.KPI.METRIC.MATCHES}', '.*', 'Regex: metrics to discover, e.g. ^(shop|hotel)\\. to keep only your own.'),
     ('{$APM.KPI.METRIC.NOT_MATCHES}', METRIC_NOT_MATCHES, 'Regex: metrics to ignore. By default the runtime, HTTP, '
         'database and SDK metrics of the OpenTelemetry instrumentation, which are not business metrics.'),
@@ -63,6 +69,13 @@ QUERY_FIELDS = [
     ('param_limit', '{$APM.KPI.LIMIT}'),
 ]
 
+TOTALS_FIELDS = [
+    ('param_db', '{$CH.DB}'), ('param_ns', '{$APM.NAMESPACE}'), ('param_delay', '{$APM.KPI.DELAY}'),
+    ('param_tz', '{$APM.KPI.TIMEZONE}'), ('param_metric_matches', '{$APM.KPI.METRIC.MATCHES}'),
+    ('param_metric_not_matches', '{$APM.KPI.METRIC.NOT_MATCHES}'),
+    ('param_dim_not_matches', '{$APM.KPI.DIMENSION.NOT_MATCHES}'), ('param_limit', '{$APM.KPI.LIMIT}'),
+]
+
 # LLD macros: the value of the item (count for a histogram), the label of the value and its units.
 LLD_JS = '''var rows = JSON.parse(value).data, out = [];
 var labels = {counter: 'per minute', updown: 'current', gauge: 'current', histogram: 'count per minute'};
@@ -83,8 +96,10 @@ LLD_PATHS = {
 }
 DIM_PATHS = {'{#DIM}': '$.dim', '{#DIMVALUE}': '$.dim_value'}
 
-HOW_TO_SUM = ('Sum its history over a period for the total of that period (e.g. a day), or read the "last hour", '
-    '"today" and "yesterday" items.')
+HOW_TO_SUM = ('For a total read the "last hour", "last 24 hours", "today" and "yesterday" items (from ClickHouse), or '
+    'sum the history of the "per hour" item over a longer period.')
+FROM_CLICKHOUSE = (' Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 '
+    'days by default).')
 
 
 def tags(dimension: bool) -> list:
@@ -108,13 +123,14 @@ def prototypes(dimension: bool) -> list:
         where = "@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key==''"
         scope = ''
 
-    def dependent(key: str, label: str, field: str, units: str, description: str) -> dict:
+    def dependent(key: str, label: str, field: str, units: str, description: str, master: str = MASTER,
+            history: str = '31d') -> dict:
         return {
-            'name': f'{title}: {label}', 'type': 'DEPENDENT', 'key': f'{key}[{args}]', 'history': '31d',
+            'name': f'{title}: {label}', 'type': 'DEPENDENT', 'key': f'{key}[{args}]', 'history': history,
             'value_type': 'FLOAT', 'units': units, 'description': description,
             'preprocessing': [{'type': 'JSONPATH', 'parameters': [f'$.data[?({where})].{field}.first()'],
                                'error_handler': 'DISCARD_VALUE'}],
-            'master_item': {'key': MASTER}, 'tags': tags(dimension)
+            'master_item': {'key': master}, 'tags': tags(dimension)
         }
 
     def calculated(key: str, label: str, formula: str, delay: str, units: str, description: str,
@@ -125,32 +141,52 @@ def prototypes(dimension: bool) -> list:
             'tags': tags(dimension)
         }
 
-    value = f'//apm.kpi.value[{args}]'
-    total = f'//apm.kpi.sum[{args}]'
+    def total(key: str, label: str, field: str, units: str, description: str, history: str = '31d') -> dict:
+        return dependent(key, label, field, units, '{#DESCRIPTION}' + scope + ': ' + description + FROM_CLICKHOUSE,
+            TOTALS, history)
 
-    return [
+    value = f'//apm.kpi.value[{args}]'
+
+    items = [
         dependent('apm.kpi.value', '{#LABEL}', 'value', '{#UNIT}',
             '{#DESCRIPTION}. OpenTelemetry metric {#METRIC} ({#KIND}) of service {#SERVICE}' + scope + '. '
             'Counter: increase in each minute. Histogram: number of measurements in each minute. Up-down counter or '
             'gauge: current value. ' + HOW_TO_SUM),
-        calculated('apm.kpi.1h', 'last hour', f'sum({value},1h)', '1m', '{#UNIT}',
-            '{#DESCRIPTION}' + scope + ': total of the last 60 minutes (counters and histograms).'),
+        total('apm.kpi.1h', 'last hour', 'last_hour', '{#UNIT}', 'total of the last 60 minutes.'),
+        total('apm.kpi.24h', 'last 24 hours', 'last_24h', '{#UNIT}', 'total of the last 24 hours.'),
+        total('apm.kpi.today', 'today', 'today', '{#UNIT}', 'total since 00:00 today ({$APM.KPI.TIMEZONE}).'),
+        total('apm.kpi.yesterday', 'yesterday', 'yesterday', '{#UNIT}',
+            'total of yesterday ({$APM.KPI.TIMEZONE}). Its history keeps the total of each day.', history='400d'),
+        total('apm.kpi.total', 'total (counter)', 'counter', '{#UNIT}',
+            'value that the counter of the application reports now, i.e. its total since the application started '
+            '(summed over its running instances). It starts again from 0 when the application restarts; compare it '
+            'with the figures of the application itself.'),
         calculated('apm.kpi.hour', 'per hour', f'sum({value},1h:now/h)', '0;m5', '{#UNIT}',
             '{#DESCRIPTION}' + scope + ': total of the previous clock hour, stored at minute 5 of the next one. One '
             'value per hour: sum them for a period of several hours or days.', history='400d'),
-        calculated('apm.kpi.today', 'today', f'sum({value},1d:now/d+1d)', '5m', '{#UNIT}',
-            '{#DESCRIPTION}' + scope + ': total since 00:00 today, in the time zone of the Zabbix server.'),
-        calculated('apm.kpi.yesterday', 'yesterday', f'sum({value},1d:now/d)', '1h', '{#UNIT}',
-            '{#DESCRIPTION}' + scope + ': total of yesterday, in the time zone of the Zabbix server.', history='400d'),
+        calculated('apm.kpi.7d', 'last 7 days', f'sum(//apm.kpi.hour[{args}],7d)', '1h', '{#UNIT}',
+            '{#DESCRIPTION}' + scope + ': sum of the "per hour" values of the last 7 days. From the history of Zabbix: '
+            'it only counts since the item exists.', history='400d'),
         dependent('apm.kpi.sum', 'sum per minute', 'sum', '{#SUM.UNIT}',
             '{#DESCRIPTION}' + scope + ': sum of the measurements in each minute (e.g. the amount of the orders). '
             + HOW_TO_SUM),
-        calculated('apm.kpi.sum.today', 'sum today', f'sum({total},1d:now/d+1d)', '5m', '{#SUM.UNIT}',
-            '{#DESCRIPTION}' + scope + ': sum of the measurements since 00:00 today.'),
-        calculated('apm.kpi.avg.1h', 'average last hour', f'sum({total},1h)/max(sum({value},1h),1)', '1m',
-            '{#SUM.UNIT}', '{#DESCRIPTION}' + scope + ': average measurement of the last 60 minutes (e.g. the average '
-            'order amount).'),
+        total('apm.kpi.sum.today', 'sum today', 'sum_today', '{#SUM.UNIT}',
+            'sum of the measurements since 00:00 today (e.g. the amount of the orders).'),
+        total('apm.kpi.sum.yesterday', 'sum yesterday', 'sum_yesterday', '{#SUM.UNIT}',
+            'sum of the measurements of yesterday.', history='400d'),
+        total('apm.kpi.avg.today', 'average today', 'avg_today', '{#SUM.UNIT}',
+            'average measurement since 00:00 today (e.g. the average order amount).'),
     ]
+
+    if dimension:
+        items += [
+            total('apm.kpi.share.today', 'share today', 'share_today', '%',
+                'share of today of {#DIM} = {#DIMVALUE} within all the values of {#DIM}, to compare them.'),
+            total('apm.kpi.rank.today', 'rank today', 'rank_today', '',
+                'position of {#DIMVALUE} among the values of {#DIM} by today (1 = the largest).'),
+        ]
+
+    return items
 
 
 def overrides() -> list:
@@ -164,9 +200,10 @@ def overrides() -> list:
 
     return [
         override(1, 'Current values have no totals', '^(gauge|updown)$', 'MATCHES_REGEX',
-            ': (last hour|per hour|today|yesterday)$'),
+            ': (last hour|last 24 hours|per hour|last 7 days|today|yesterday|total \\(counter\\)|share today|'
+            'rank today)$'),
         override(2, 'Only histograms have a sum and an average', '^histogram$', 'NOT_MATCHES_REGEX',
-            ': (sum per minute|sum today|average last hour)$'),
+            ': (sum per minute|sum today|sum yesterday|average today)$'),
     ]
 
 
@@ -205,9 +242,12 @@ def discovery(dimension: bool) -> dict:
 
 
 def build() -> dict:
-    # Without the header comment of the file; the comments inside the query stay.
-    sql = '\n'.join(line for line in SQL.read_text(encoding='utf-8').splitlines() if not line.startswith('--'))
-    sql = sql.strip() + '\n'
+    # Without the header comment of the files; the comments inside the queries stay.
+    def query(path: Path) -> str:
+        return '\n'.join(line for line in path.read_text(encoding='utf-8').splitlines()
+            if not line.startswith('--')).strip() + '\n'
+
+    sql = query(SQL)
 
     master = {
         'name': 'APM business metrics: Get', 'type': 'HTTP_AGENT', 'key': MASTER, 'history': '0',
@@ -220,6 +260,15 @@ def build() -> dict:
         'description': 'Business metrics of the application in the last closed minute: one row per metric and one per '
             'value of each attribute. The discovery rules and the KPI items are dependent on this item.',
         'tags': [{'tag': 'component', 'value': 'kpi'}],
+    }
+    totals = master | {
+        'name': 'APM business metrics: Get totals', 'key': TOTALS, 'delay': '{$APM.KPI.TOTALS.INTERVAL}',
+        'timeout': '30s',
+        'query_fields': [{'name': name, 'value': value} for name, value in TOTALS_FIELDS],
+        'posts': query(TOTALS_SQL),
+        'description': 'Totals of the business metrics from ClickHouse: last hour, last 24 hours, today, yesterday, the '
+            'value of each counter, and the share and rank of each attribute value. The total items are dependent on '
+            'this item.',
     }
     rows = {
         'name': 'APM business metrics: Rows', 'type': 'DEPENDENT', 'key': 'apm.kpi.rows', 'history': '7d',
@@ -256,17 +305,19 @@ def build() -> dict:
         'template': NAME,
         'name': NAME,
         'description': (
-            'Version 1.0. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse '
+            'Version 1.1. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse '
             '(otel_metrics_sum, otel_metrics_gauge, otel_metrics_histogram), through the ClickHouse HTTP interface: '
             'orders by store, reservations by hotel, revenue, carts abandoned... whatever counters, gauges and '
             'histograms the application sends.\n\n'
             'Link it to the host of the application (apm-<namespace>, see scripts/zabbix-apm-app.py add --kpi) and '
-            'set {$APM.NAMESPACE}. Each metric gets an item with its value per minute, plus the totals of the last '
-            'hour, today and yesterday; each value of its attributes (store, hotel, currency...) gets the same items.'
-            ' One query per minute; everything else is dependent or calculated.\n\n'
+            'set {$APM.NAMESPACE}. Each metric gets an item with its value per minute and per hour, the totals of the '
+            'last hour, last 24 hours, today and yesterday (from ClickHouse, complete from the first minute) and the '
+            'value of its counter; each value of its attributes (store, hotel, currency...) gets the same items plus '
+            'its share and rank of today, to compare them. Two queries (per minute and totals); everything else is '
+            'dependent or calculated.\n\n'
             'Docs: https://github.com/SimonLexRS/zabbix-apm-dashboard/blob/main/docs/business-kpis.md'),
         'groups': [{'name': GROUP}],
-        'items': [master, rows],
+        'items': [master, totals, rows],
         'discovery_rules': [discovery(False), discovery(True)],
         'tags': [{'tag': 'class', 'value': 'application'}, {'tag': 'target', 'value': 'apm'}],
         'macros': macros,

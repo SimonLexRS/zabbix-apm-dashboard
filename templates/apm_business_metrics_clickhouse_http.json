@@ -12,7 +12,7 @@
                 "uuid": "5f1a1bf6a26c499eb996605ae33b52af",
                 "template": "APM business metrics by ClickHouse HTTP",
                 "name": "APM business metrics by ClickHouse HTTP",
-                "description": "Version 1.0. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse (otel_metrics_sum, otel_metrics_gauge, otel_metrics_histogram), through the ClickHouse HTTP interface: orders by store, reservations by hotel, revenue, carts abandoned... whatever counters, gauges and histograms the application sends.\n\nLink it to the host of the application (apm-<namespace>, see scripts/zabbix-apm-app.py add --kpi) and set {$APM.NAMESPACE}. Each metric gets an item with its value per minute, plus the totals of the last hour, today and yesterday; each value of its attributes (store, hotel, currency...) gets the same items. One query per minute; everything else is dependent or calculated.\n\nDocs: https://github.com/SimonLexRS/zabbix-apm-dashboard/blob/main/docs/business-kpis.md",
+                "description": "Version 1.1. Business metrics (KPIs) of one application from its OpenTelemetry metrics in ClickHouse (otel_metrics_sum, otel_metrics_gauge, otel_metrics_histogram), through the ClickHouse HTTP interface: orders by store, reservations by hotel, revenue, carts abandoned... whatever counters, gauges and histograms the application sends.\n\nLink it to the host of the application (apm-<namespace>, see scripts/zabbix-apm-app.py add --kpi) and set {$APM.NAMESPACE}. Each metric gets an item with its value per minute and per hour, the totals of the last hour, last 24 hours, today and yesterday (from ClickHouse, complete from the first minute) and the value of its counter; each value of its attributes (store, hotel, currency...) gets the same items plus its share and rank of today, to compare them. Two queries (per minute and totals); everything else is dependent or calculated.\n\nDocs: https://github.com/SimonLexRS/zabbix-apm-dashboard/blob/main/docs/business-kpis.md",
                 "groups": [
                     {
                         "name": "Templates/Applications"
@@ -66,7 +66,7 @@
                                 "value": "{$APM.KPI.LIMIT}"
                             }
                         ],
-                        "posts": "WITH\n    toDateTime(toStartOfMinute(now()) - {delay:UInt32}) AS t1,\n    t1 - 60 AS t0,\n    t1 - {window:UInt32} * 60 AS tw,\n    -- Quotes and backslashes are removed from names: they would break the item keys and JSONPath filters.\n    (x -> replaceRegexpAll(x, '[''\"\\\\\\\\]', '')) AS clean\nSELECT\n    service, metric, kind, any(unit) AS unit, any(description) AS description, dim.1 AS dim_key, dim.2 AS dim_value,\n    round(sum(value), 6) AS value, round(sum(cnt), 6) AS count, round(sum(total), 6) AS sum, round(sum(win), 6) AS window_total\nFROM\n(\n    SELECT\n        service, metric, kind, unit, description, attrs,\n        arrayMap(p -> p.1, pts) AS ts,\n        arrayMap(p -> p.2, pts) AS vs,\n        arrayMap(p -> p.3, pts) AS ss,\n        arrayMap(p -> p.4, pts) AS starts,\n        -- Increase of a cumulative series in [t0, t1): differences between consecutive points, a reset (lower value)\n        -- counts the new value, and a series that starts inside the window counts its first value.\n        arrayMap((v, pv, st, i) -> if(i = 1, if(st >= tw, v, 0), if(v >= pv, v - pv, v)),\n            vs, arrayPopBack(arrayPushFront(vs, 0)), starts, arrayEnumerate(vs)) AS dv,\n        arrayMap((v, pv, st, i) -> if(i = 1, if(st >= tw, v, 0), if(v >= pv, v - pv, v)),\n            ss, arrayPopBack(arrayPushFront(ss, 0)), starts, arrayEnumerate(ss)) AS ds,\n        arraySum(arrayMap((d, t) -> if(t >= t0, d, 0), if(delta, vs, dv), ts)) AS inc_v,\n        arraySum(arrayMap((d, t) -> if(t >= t0, d, 0), if(delta, ss, ds), ts)) AS inc_s,\n        -- Current values count only for instances that reported in the last 5 minutes (not one that stopped).\n        if(kind IN ('gauge', 'updown'), if(ts[-1] >= t1 - 300, vs[-1], 0), inc_v) AS value,\n        if(kind = 'histogram', inc_v, 0) AS cnt,\n        if(kind = 'histogram', inc_s, 0) AS total,\n        if(kind IN ('gauge', 'updown'), arrayMax(vs), arraySum(if(delta, vs, dv))) AS win\n    FROM\n    (\n        SELECT\n            clean(ServiceName) AS service, clean(MetricName) AS metric, kind, Attributes AS attrs,\n            if(match(any(MetricUnit), '^([{].*[}]|1)$'), '', any(MetricUnit)) AS unit, any(MetricDescription) AS description, max(temporality = 1) AS delta,\n            arraySort(p -> p.1, groupArray((TimeUnix, v, s, StartTimeUnix))) AS pts\n        FROM\n        (\n            SELECT ServiceName, MetricName, MetricUnit, MetricDescription, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, Value AS v, 0 AS s, AggregationTemporality AS temporality,\n                   if(IsMonotonic, 'counter', 'updown') AS kind\n            FROM {db:Identifier}.otel_metrics_sum\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n            UNION ALL\n            SELECT ServiceName, MetricName, MetricUnit, MetricDescription, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, Value, 0, 0, 'gauge'\n            FROM {db:Identifier}.otel_metrics_gauge\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n            UNION ALL\n            SELECT ServiceName, MetricName, MetricUnit, MetricDescription, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, toFloat64(Count), Sum, AggregationTemporality, 'histogram'\n            FROM {db:Identifier}.otel_metrics_histogram\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n        )\n        WHERE ResourceAttributes['service.namespace'] = {ns:String}\n          AND match(MetricName, {metric_matches:String})\n          AND ({metric_not_matches:String} = '' OR NOT match(MetricName, {metric_not_matches:String}))\n        GROUP BY ServiceName, MetricName, kind, attrs, ResourceAttributes['service.instance.id']\n    )\n)\nARRAY JOIN arrayConcat([('', '')], arrayMap(k -> (clean(k), clean(attrs[k])),\n    arrayFilter(k -> {dim_not_matches:String} = '' OR NOT match(k, {dim_not_matches:String}), mapKeys(attrs)))) AS dim\nGROUP BY service, metric, kind, dim\nORDER BY dim_key != '', service, metric, dim_key, window_total DESC\nLIMIT {values_limit:UInt32} BY service, metric, kind, dim_key\nLIMIT {limit:UInt32}\nFORMAT JSON\nSETTINGS output_format_json_quote_64bit_integers = 0\n",
+                        "posts": "WITH\n    toDateTime(toStartOfMinute(now()) - {delay:UInt32}) AS t1,\n    t1 - 60 AS t0,\n    t1 - {window:UInt32} * 60 AS tw,\n    -- Quotes and backslashes are removed from names: they would break the item keys and JSONPath filters.\n    (x -> replaceRegexpAll(x, '[''\"\\\\\\\\]', '')) AS clean\nSELECT\n    service, metric, kind, any(unit) AS unit, any(description) AS description, dim.1 AS dim_key, dim.2 AS dim_value,\n    -- A percentage (e.g. occupancy) is averaged over the instances that reported, not added up.\n    round(if(kind IN ('gauge', 'updown') AND unit = '%', if(countIf(fresh) > 0, avgIf(val, fresh), 0), sum(val)), 6)\n        AS value, round(sum(cnt), 6) AS count, round(sum(total), 6) AS sum, round(sum(win), 6) AS window_total\nFROM\n(\n    SELECT\n        service, metric, kind, unit, description, attrs,\n        arrayMap(p -> p.1, pts) AS ts,\n        arrayMap(p -> p.2, pts) AS vs,\n        arrayMap(p -> p.3, pts) AS ss,\n        arrayMap(p -> p.4, pts) AS starts,\n        -- Increase of a cumulative series in [t0, t1): differences between consecutive points, a reset (lower value)\n        -- counts the new value, and a series that starts inside the window counts its first value.\n        arrayMap((v, pv, st, i) -> if(i = 1, if(st >= tw, v, 0), if(v >= pv, v - pv, v)),\n            vs, arrayPopBack(arrayPushFront(vs, 0)), starts, arrayEnumerate(vs)) AS dv,\n        arrayMap((v, pv, st, i) -> if(i = 1, if(st >= tw, v, 0), if(v >= pv, v - pv, v)),\n            ss, arrayPopBack(arrayPushFront(ss, 0)), starts, arrayEnumerate(ss)) AS ds,\n        arraySum(arrayMap((d, t) -> if(t >= t0, d, 0), if(delta, vs, dv), ts)) AS inc_v,\n        arraySum(arrayMap((d, t) -> if(t >= t0, d, 0), if(delta, ss, ds), ts)) AS inc_s,\n        -- Current values count only for instances that reported in the last 5 minutes (not one that stopped).\n        ts[-1] >= t1 - 300 AS fresh,\n        if(kind IN ('gauge', 'updown'), if(fresh, vs[-1], 0), inc_v) AS val,\n        if(kind = 'histogram', inc_v, 0) AS cnt,\n        if(kind = 'histogram', inc_s, 0) AS total,\n        if(kind IN ('gauge', 'updown'), arrayMax(vs), arraySum(if(delta, vs, dv))) AS win\n    FROM\n    (\n        SELECT\n            clean(ServiceName) AS service, clean(MetricName) AS metric, kind, Attributes AS attrs,\n            if(match(any(MetricUnit), '^([{].*[}]|1)$'), '', any(MetricUnit)) AS unit, any(MetricDescription) AS description, max(temporality = 1) AS delta,\n            arraySort(p -> p.1, groupArray((TimeUnix, v, s, StartTimeUnix))) AS pts\n        FROM\n        (\n            SELECT ServiceName, MetricName, MetricUnit, MetricDescription, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, Value AS v, 0 AS s, AggregationTemporality AS temporality,\n                   if(IsMonotonic, 'counter', 'updown') AS kind\n            FROM {db:Identifier}.otel_metrics_sum\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n            UNION ALL\n            SELECT ServiceName, MetricName, MetricUnit, MetricDescription, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, Value, 0, 0, 'gauge'\n            FROM {db:Identifier}.otel_metrics_gauge\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n            UNION ALL\n            SELECT ServiceName, MetricName, MetricUnit, MetricDescription, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, toFloat64(Count), Sum, AggregationTemporality, 'histogram'\n            FROM {db:Identifier}.otel_metrics_histogram\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n        )\n        WHERE ResourceAttributes['service.namespace'] = {ns:String}\n          AND match(MetricName, {metric_matches:String})\n          AND ({metric_not_matches:String} = '' OR NOT match(MetricName, {metric_not_matches:String}))\n        GROUP BY ServiceName, MetricName, kind, attrs, ResourceAttributes['service.instance.id']\n    )\n)\nARRAY JOIN arrayConcat([('', '')], arrayMap(k -> (clean(k), clean(attrs[k])),\n    arrayFilter(k -> {dim_not_matches:String} = '' OR NOT match(k, {dim_not_matches:String}), mapKeys(attrs)))) AS dim\nGROUP BY service, metric, kind, dim\nORDER BY dim_key != '', service, metric, dim_key, window_total DESC\nLIMIT {values_limit:UInt32} BY service, metric, kind, dim_key\nLIMIT {limit:UInt32}\nFORMAT JSON\nSETTINGS output_format_json_quote_64bit_integers = 0\n",
                         "headers": [
                             {
                                 "name": "X-ClickHouse-User",
@@ -85,6 +85,70 @@
                                 "value": "kpi"
                             }
                         ]
+                    },
+                    {
+                        "uuid": "15142321e1c4444dbfe22e184d3f479c",
+                        "name": "APM business metrics: Get totals",
+                        "type": "HTTP_AGENT",
+                        "key": "apm.kpi.totals.get",
+                        "history": "0",
+                        "value_type": "TEXT",
+                        "timeout": "30s",
+                        "url": "{$CH.URL}",
+                        "query_fields": [
+                            {
+                                "name": "param_db",
+                                "value": "{$CH.DB}"
+                            },
+                            {
+                                "name": "param_ns",
+                                "value": "{$APM.NAMESPACE}"
+                            },
+                            {
+                                "name": "param_delay",
+                                "value": "{$APM.KPI.DELAY}"
+                            },
+                            {
+                                "name": "param_tz",
+                                "value": "{$APM.KPI.TIMEZONE}"
+                            },
+                            {
+                                "name": "param_metric_matches",
+                                "value": "{$APM.KPI.METRIC.MATCHES}"
+                            },
+                            {
+                                "name": "param_metric_not_matches",
+                                "value": "{$APM.KPI.METRIC.NOT_MATCHES}"
+                            },
+                            {
+                                "name": "param_dim_not_matches",
+                                "value": "{$APM.KPI.DIMENSION.NOT_MATCHES}"
+                            },
+                            {
+                                "name": "param_limit",
+                                "value": "{$APM.KPI.LIMIT}"
+                            }
+                        ],
+                        "posts": "WITH\n    toDateTime(toStartOfMinute(now()) - {delay:UInt32}) AS t1,\n    toDateTime(toStartOfDay(t1, {tz:String})) AS d0,\n    toDateTime(toStartOfDay(d0 - 3600, {tz:String})) AS y0,\n    -- Points before yesterday give the value each series had when yesterday started.\n    y0 - 900 AS tw,\n    (x -> replaceRegexpAll(x, '[''\"\\\\\\\\]', '')) AS clean\nSELECT\n    service, metric, kind, any(unit) AS unit, dim.1 AS dim_key, dim.2 AS dim_value,\n    round(sum(last_hour), 6) AS last_hour, round(sum(last_24h), 6) AS last_24h,\n    round(sum(today), 6) AS today, round(sum(yesterday), 6) AS yesterday,\n    if(max(delta), NULL, round(sum(counter), 6)) AS counter,\n    round(sum(sum_today), 6) AS sum_today, round(sum(sum_yesterday), 6) AS sum_yesterday,\n    if(today > 0, round(sum_today / today, 6), 0) AS avg_today,\n    if(sum(today) OVER w > 0, round(today * 100 / sum(today) OVER w, 3), 0) AS share_today,\n    row_number() OVER (w ORDER BY today DESC, dim_value) AS rank_today\nFROM\n(\n    SELECT\n        service, metric, kind, unit, attrs, delta,\n        -- Increase at each point of a cumulative series: a reset (lower value) counts the new value, and a series that\n        -- starts inside the window counts its first value. Delta series are their own increase.\n        if(delta, vs, arrayMap((v, pv, st, i) -> if(i = 1, if(st >= tw, v, 0), if(v >= pv, v - pv, v)),\n            vs, arrayPopBack(arrayPushFront(vs, 0)), starts, arrayEnumerate(vs))) AS dv,\n        if(delta, ss, arrayMap((v, pv, st, i) -> if(i = 1, if(st >= tw, v, 0), if(v >= pv, v - pv, v)),\n            ss, arrayPopBack(arrayPushFront(ss, 0)), starts, arrayEnumerate(ss))) AS ds,\n        arraySum(arrayMap((d, t) -> if(t >= t1 - 3600, d, 0), dv, ts)) AS last_hour,\n        arraySum(arrayMap((d, t) -> if(t >= t1 - 86400, d, 0), dv, ts)) AS last_24h,\n        arraySum(arrayMap((d, t) -> if(t >= d0, d, 0), dv, ts)) AS today,\n        arraySum(arrayMap((d, t) -> if(t >= y0 AND t < d0, d, 0), dv, ts)) AS yesterday,\n        -- Instances that stopped reporting more than 5 minutes ago (e.g. before a restart) do not count.\n        if(ts[-1] >= t1 - 300, vs[-1], 0) AS counter,\n        if(kind = 'histogram', arraySum(arrayMap((d, t) -> if(t >= d0, d, 0), ds, ts)), 0) AS sum_today,\n        if(kind = 'histogram', arraySum(arrayMap((d, t) -> if(t >= y0 AND t < d0, d, 0), ds, ts)), 0) AS sum_yesterday\n    FROM\n    (\n        SELECT\n            clean(ServiceName) AS service, clean(MetricName) AS metric, kind, Attributes AS attrs,\n            if(match(any(MetricUnit), '^([{].*[}]|1)$'), '', any(MetricUnit)) AS unit, max(temporality = 1) AS delta,\n            arraySort(p -> p.1, groupArray((TimeUnix, v, s, StartTimeUnix))) AS pts,\n            arrayMap(p -> p.1, pts) AS ts, arrayMap(p -> p.2, pts) AS vs, arrayMap(p -> p.3, pts) AS ss,\n            arrayMap(p -> p.4, pts) AS starts\n        FROM\n        (\n            SELECT ServiceName, MetricName, MetricUnit, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, Value AS v, 0 AS s, AggregationTemporality AS temporality,\n                   if(IsMonotonic, 'counter', 'updown') AS kind\n            FROM {db:Identifier}.otel_metrics_sum\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n            UNION ALL\n            SELECT ServiceName, MetricName, MetricUnit, Attributes, ResourceAttributes,\n                   TimeUnix, StartTimeUnix, toFloat64(Count), Sum, AggregationTemporality, 'histogram'\n            FROM {db:Identifier}.otel_metrics_histogram\n            WHERE TimeUnix >= tw AND TimeUnix < t1\n        )\n        WHERE ResourceAttributes['service.namespace'] = {ns:String}\n          AND match(MetricName, {metric_matches:String})\n          AND ({metric_not_matches:String} = '' OR NOT match(MetricName, {metric_not_matches:String}))\n        GROUP BY ServiceName, MetricName, kind, attrs, ResourceAttributes['service.instance.id']\n    )\n)\nARRAY JOIN arrayConcat([('', '')], arrayMap(k -> (clean(k), clean(attrs[k])),\n    arrayFilter(k -> {dim_not_matches:String} = '' OR NOT match(k, {dim_not_matches:String}), mapKeys(attrs)))) AS dim\nGROUP BY service, metric, kind, dim\nWINDOW w AS (PARTITION BY service, metric, kind, dim_key)\nORDER BY dim_key != '', service, metric, dim_key, rank_today\nLIMIT {limit:UInt32}\nFORMAT JSON\nSETTINGS output_format_json_quote_64bit_integers = 0\n",
+                        "headers": [
+                            {
+                                "name": "X-ClickHouse-User",
+                                "value": "{$CH.USER}"
+                            },
+                            {
+                                "name": "X-ClickHouse-Key",
+                                "value": "{$CH.PASSWORD}"
+                            }
+                        ],
+                        "request_method": "POST",
+                        "description": "Totals of the business metrics from ClickHouse: last hour, last 24 hours, today, yesterday, the value of each counter, and the share and rank of each attribute value. The total items are dependent on this item.",
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "kpi"
+                            }
+                        ],
+                        "delay": "{$APM.KPI.TOTALS.INTERVAL}"
                     },
                     {
                         "uuid": "fe05a2a80e0d45ce814ced2ad52a55e7",
@@ -162,7 +226,7 @@
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#UNIT}",
-                                "description": "{#DESCRIPTION}. OpenTelemetry metric {#METRIC} ({#KIND}) of service {#SERVICE}. Counter: increase in each minute. Histogram: number of measurements in each minute. Up-down counter or gauge: current value. Sum its history over a period for the total of that period (e.g. a day), or read the \"last hour\", \"today\" and \"yesterday\" items.",
+                                "description": "{#DESCRIPTION}. OpenTelemetry metric {#METRIC} ({#KIND}) of service {#SERVICE}. Counter: increase in each minute. Histogram: number of measurements in each minute. Up-down counter or gauge: current value. For a total read the \"last hour\", \"last 24 hours\", \"today\" and \"yesterday\" items (from ClickHouse), or sum the history of the \"per hour\" item over a longer period.",
                                 "preprocessing": [
                                     {
                                         "type": "JSONPATH",
@@ -197,14 +261,184 @@
                             {
                                 "uuid": "9c03a63796784ee8bfc804a3b1ccb467",
                                 "name": "KPI {#METRIC} ({#SERVICE}): last hour",
-                                "type": "CALCULATED",
+                                "type": "DEPENDENT",
                                 "key": "apm.kpi.1h[\"{#SERVICE}\",\"{#METRIC}\"]",
-                                "delay": "1m",
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#UNIT}",
-                                "params": "sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\"],1h)",
-                                "description": "{#DESCRIPTION}: total of the last 60 minutes (counters and histograms).",
+                                "description": "{#DESCRIPTION}: total of the last 60 minutes. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].last_hour.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "d9f53629d18f4a568f27ebf28d9523e6",
+                                "name": "KPI {#METRIC} ({#SERVICE}): last 24 hours",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.24h[\"{#SERVICE}\",\"{#METRIC}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION}: total of the last 24 hours. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].last_24h.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "10e4a8eebe4744aca27609375eb7efe4",
+                                "name": "KPI {#METRIC} ({#SERVICE}): today",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.today[\"{#SERVICE}\",\"{#METRIC}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION}: total since 00:00 today ({$APM.KPI.TIMEZONE}). Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "712523187387433289ce6ebe509e0153",
+                                "name": "KPI {#METRIC} ({#SERVICE}): yesterday",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.yesterday[\"{#SERVICE}\",\"{#METRIC}\"]",
+                                "history": "400d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION}: total of yesterday ({$APM.KPI.TIMEZONE}). Its history keeps the total of each day. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].yesterday.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "ccda75d55e2d40f3aa900160ba4a2d48",
+                                "name": "KPI {#METRIC} ({#SERVICE}): total (counter)",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.total[\"{#SERVICE}\",\"{#METRIC}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION}: value that the counter of the application reports now, i.e. its total since the application started (summed over its running instances). It starts again from 0 when the application restarts; compare it with the figures of the application itself. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].counter.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -255,46 +489,16 @@
                                 ]
                             },
                             {
-                                "uuid": "10e4a8eebe4744aca27609375eb7efe4",
-                                "name": "KPI {#METRIC} ({#SERVICE}): today",
+                                "uuid": "fbac5a59ee174e5cad4bed9771fc177c",
+                                "name": "KPI {#METRIC} ({#SERVICE}): last 7 days",
                                 "type": "CALCULATED",
-                                "key": "apm.kpi.today[\"{#SERVICE}\",\"{#METRIC}\"]",
-                                "delay": "5m",
-                                "history": "31d",
-                                "value_type": "FLOAT",
-                                "units": "{#UNIT}",
-                                "params": "sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\"],1d:now/d+1d)",
-                                "description": "{#DESCRIPTION}: total since 00:00 today, in the time zone of the Zabbix server.",
-                                "tags": [
-                                    {
-                                        "tag": "component",
-                                        "value": "kpi"
-                                    },
-                                    {
-                                        "tag": "kind",
-                                        "value": "{#KIND}"
-                                    },
-                                    {
-                                        "tag": "kpi",
-                                        "value": "{#METRIC}"
-                                    },
-                                    {
-                                        "tag": "service",
-                                        "value": "{#SERVICE}"
-                                    }
-                                ]
-                            },
-                            {
-                                "uuid": "712523187387433289ce6ebe509e0153",
-                                "name": "KPI {#METRIC} ({#SERVICE}): yesterday",
-                                "type": "CALCULATED",
-                                "key": "apm.kpi.yesterday[\"{#SERVICE}\",\"{#METRIC}\"]",
+                                "key": "apm.kpi.7d[\"{#SERVICE}\",\"{#METRIC}\"]",
                                 "delay": "1h",
                                 "history": "400d",
                                 "value_type": "FLOAT",
                                 "units": "{#UNIT}",
-                                "params": "sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\"],1d:now/d)",
-                                "description": "{#DESCRIPTION}: total of yesterday, in the time zone of the Zabbix server.",
+                                "params": "sum(//apm.kpi.hour[\"{#SERVICE}\",\"{#METRIC}\"],7d)",
+                                "description": "{#DESCRIPTION}: sum of the \"per hour\" values of the last 7 days. From the history of Zabbix: it only counts since the item exists.",
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -322,7 +526,7 @@
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#SUM.UNIT}",
-                                "description": "{#DESCRIPTION}: sum of the measurements in each minute (e.g. the amount of the orders). Sum its history over a period for the total of that period (e.g. a day), or read the \"last hour\", \"today\" and \"yesterday\" items.",
+                                "description": "{#DESCRIPTION}: sum of the measurements in each minute (e.g. the amount of the orders). For a total read the \"last hour\", \"last 24 hours\", \"today\" and \"yesterday\" items (from ClickHouse), or sum the history of the \"per hour\" item over a longer period.",
                                 "preprocessing": [
                                     {
                                         "type": "JSONPATH",
@@ -357,14 +561,24 @@
                             {
                                 "uuid": "d5f52b3d913a4d959b95b01be6125a4c",
                                 "name": "KPI {#METRIC} ({#SERVICE}): sum today",
-                                "type": "CALCULATED",
+                                "type": "DEPENDENT",
                                 "key": "apm.kpi.sum.today[\"{#SERVICE}\",\"{#METRIC}\"]",
-                                "delay": "5m",
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#SUM.UNIT}",
-                                "params": "sum(//apm.kpi.sum[\"{#SERVICE}\",\"{#METRIC}\"],1d:now/d+1d)",
-                                "description": "{#DESCRIPTION}: sum of the measurements since 00:00 today.",
+                                "description": "{#DESCRIPTION}: sum of the measurements since 00:00 today (e.g. the amount of the orders). Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].sum_today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -385,16 +599,66 @@
                                 ]
                             },
                             {
-                                "uuid": "a531e3c0ec9546f08ed70e90c3a57a29",
-                                "name": "KPI {#METRIC} ({#SERVICE}): average last hour",
-                                "type": "CALCULATED",
-                                "key": "apm.kpi.avg.1h[\"{#SERVICE}\",\"{#METRIC}\"]",
-                                "delay": "1m",
+                                "uuid": "210ade2d0ad342ad971bfad1662b9a16",
+                                "name": "KPI {#METRIC} ({#SERVICE}): sum yesterday",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.sum.yesterday[\"{#SERVICE}\",\"{#METRIC}\"]",
+                                "history": "400d",
+                                "value_type": "FLOAT",
+                                "units": "{#SUM.UNIT}",
+                                "description": "{#DESCRIPTION}: sum of the measurements of yesterday. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].sum_yesterday.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "64c01cf36a00437d80eb9da156ce01ca",
+                                "name": "KPI {#METRIC} ({#SERVICE}): average today",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.avg.today[\"{#SERVICE}\",\"{#METRIC}\"]",
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#SUM.UNIT}",
-                                "params": "sum(//apm.kpi.sum[\"{#SERVICE}\",\"{#METRIC}\"],1h)/max(sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\"],1h),1)",
-                                "description": "{#DESCRIPTION}: average measurement of the last 60 minutes (e.g. the average order amount).",
+                                "description": "{#DESCRIPTION}: average measurement since 00:00 today (e.g. the average order amount). Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='')].avg_today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -479,7 +743,7 @@
                                     {
                                         "operationobject": "ITEM_PROTOTYPE",
                                         "operator": "REGEXP",
-                                        "value": ": (last hour|per hour|today|yesterday)$",
+                                        "value": ": (last hour|last 24 hours|per hour|last 7 days|today|yesterday|total \\(counter\\)|share today|rank today)$",
                                         "discover": "NO_DISCOVER"
                                     }
                                 ]
@@ -500,7 +764,7 @@
                                     {
                                         "operationobject": "ITEM_PROTOTYPE",
                                         "operator": "REGEXP",
-                                        "value": ": (sum per minute|sum today|average last hour)$",
+                                        "value": ": (sum per minute|sum today|sum yesterday|average today)$",
                                         "discover": "NO_DISCOVER"
                                     }
                                 ]
@@ -540,7 +804,7 @@
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#UNIT}",
-                                "description": "{#DESCRIPTION}. OpenTelemetry metric {#METRIC} ({#KIND}) of service {#SERVICE} for {#DIM} = {#DIMVALUE}. Counter: increase in each minute. Histogram: number of measurements in each minute. Up-down counter or gauge: current value. Sum its history over a period for the total of that period (e.g. a day), or read the \"last hour\", \"today\" and \"yesterday\" items.",
+                                "description": "{#DESCRIPTION}. OpenTelemetry metric {#METRIC} ({#KIND}) of service {#SERVICE} for {#DIM} = {#DIMVALUE}. Counter: increase in each minute. Histogram: number of measurements in each minute. Up-down counter or gauge: current value. For a total read the \"last hour\", \"last 24 hours\", \"today\" and \"yesterday\" items (from ClickHouse), or sum the history of the \"per hour\" item over a longer period.",
                                 "preprocessing": [
                                     {
                                         "type": "JSONPATH",
@@ -583,14 +847,216 @@
                             {
                                 "uuid": "f058db1db2374ddaa5292641f971650a",
                                 "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): last hour",
-                                "type": "CALCULATED",
+                                "type": "DEPENDENT",
                                 "key": "apm.kpi.1h[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
-                                "delay": "1m",
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#UNIT}",
-                                "params": "sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"],1h)",
-                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: total of the last 60 minutes (counters and histograms).",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: total of the last 60 minutes. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].last_hour.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "dimension",
+                                        "value": "{#DIM}"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "{#DIM}",
+                                        "value": "{#DIMVALUE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "711fc494f0544d62a3eb73bb2bc8a070",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): last 24 hours",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.24h[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: total of the last 24 hours. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].last_24h.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "dimension",
+                                        "value": "{#DIM}"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "{#DIM}",
+                                        "value": "{#DIMVALUE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "43491e19d10649368bfb59a4b54246be",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): today",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.today[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: total since 00:00 today ({$APM.KPI.TIMEZONE}). Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "dimension",
+                                        "value": "{#DIM}"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "{#DIM}",
+                                        "value": "{#DIMVALUE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "659beee91e77428bbba87e7bf98015ea",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): yesterday",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.yesterday[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "history": "400d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: total of yesterday ({$APM.KPI.TIMEZONE}). Its history keeps the total of each day. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].yesterday.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "dimension",
+                                        "value": "{#DIM}"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "{#DIM}",
+                                        "value": "{#DIMVALUE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "85e96b64068f48008c789e2f922f12f3",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): total (counter)",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.total[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "{#UNIT}",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: value that the counter of the application reports now, i.e. its total since the application started (summed over its running instances). It starts again from 0 when the application restarts; compare it with the figures of the application itself. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].counter.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -657,54 +1123,16 @@
                                 ]
                             },
                             {
-                                "uuid": "43491e19d10649368bfb59a4b54246be",
-                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): today",
+                                "uuid": "c00a7c8b5f354714a1a742e8ed4ad2d1",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): last 7 days",
                                 "type": "CALCULATED",
-                                "key": "apm.kpi.today[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
-                                "delay": "5m",
-                                "history": "31d",
-                                "value_type": "FLOAT",
-                                "units": "{#UNIT}",
-                                "params": "sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"],1d:now/d+1d)",
-                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: total since 00:00 today, in the time zone of the Zabbix server.",
-                                "tags": [
-                                    {
-                                        "tag": "component",
-                                        "value": "kpi"
-                                    },
-                                    {
-                                        "tag": "dimension",
-                                        "value": "{#DIM}"
-                                    },
-                                    {
-                                        "tag": "kind",
-                                        "value": "{#KIND}"
-                                    },
-                                    {
-                                        "tag": "kpi",
-                                        "value": "{#METRIC}"
-                                    },
-                                    {
-                                        "tag": "service",
-                                        "value": "{#SERVICE}"
-                                    },
-                                    {
-                                        "tag": "{#DIM}",
-                                        "value": "{#DIMVALUE}"
-                                    }
-                                ]
-                            },
-                            {
-                                "uuid": "659beee91e77428bbba87e7bf98015ea",
-                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): yesterday",
-                                "type": "CALCULATED",
-                                "key": "apm.kpi.yesterday[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "key": "apm.kpi.7d[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
                                 "delay": "1h",
                                 "history": "400d",
                                 "value_type": "FLOAT",
                                 "units": "{#UNIT}",
-                                "params": "sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"],1d:now/d)",
-                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: total of yesterday, in the time zone of the Zabbix server.",
+                                "params": "sum(//apm.kpi.hour[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"],7d)",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: sum of the \"per hour\" values of the last 7 days. From the history of Zabbix: it only counts since the item exists.",
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -740,7 +1168,7 @@
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#SUM.UNIT}",
-                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: sum of the measurements in each minute (e.g. the amount of the orders). Sum its history over a period for the total of that period (e.g. a day), or read the \"last hour\", \"today\" and \"yesterday\" items.",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: sum of the measurements in each minute (e.g. the amount of the orders). For a total read the \"last hour\", \"last 24 hours\", \"today\" and \"yesterday\" items (from ClickHouse), or sum the history of the \"per hour\" item over a longer period.",
                                 "preprocessing": [
                                     {
                                         "type": "JSONPATH",
@@ -783,14 +1211,24 @@
                             {
                                 "uuid": "61fb27b2b3934ca09fbdfc56e972d7bb",
                                 "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): sum today",
-                                "type": "CALCULATED",
+                                "type": "DEPENDENT",
                                 "key": "apm.kpi.sum.today[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
-                                "delay": "5m",
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#SUM.UNIT}",
-                                "params": "sum(//apm.kpi.sum[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"],1d:now/d+1d)",
-                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: sum of the measurements since 00:00 today.",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: sum of the measurements since 00:00 today (e.g. the amount of the orders). Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].sum_today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -819,16 +1257,170 @@
                                 ]
                             },
                             {
-                                "uuid": "7869f89af5a14cc089c155508c5ac4be",
-                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): average last hour",
-                                "type": "CALCULATED",
-                                "key": "apm.kpi.avg.1h[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
-                                "delay": "1m",
+                                "uuid": "fa09c3c5975c469d9960dad03c6d2730",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): sum yesterday",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.sum.yesterday[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "history": "400d",
+                                "value_type": "FLOAT",
+                                "units": "{#SUM.UNIT}",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: sum of the measurements of yesterday. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].sum_yesterday.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "dimension",
+                                        "value": "{#DIM}"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "{#DIM}",
+                                        "value": "{#DIMVALUE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "5b3f6abe665049bd9967585445ad1bb7",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): average today",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.avg.today[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
                                 "history": "31d",
                                 "value_type": "FLOAT",
                                 "units": "{#SUM.UNIT}",
-                                "params": "sum(//apm.kpi.sum[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"],1h)/max(sum(//apm.kpi.value[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"],1h),1)",
-                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: average measurement of the last 60 minutes (e.g. the average order amount).",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: average measurement since 00:00 today (e.g. the average order amount). Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].avg_today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "dimension",
+                                        "value": "{#DIM}"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "{#DIM}",
+                                        "value": "{#DIMVALUE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "f008c32af1514050a3f4a533e618486d",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): share today",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.share.today[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "%",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: share of today of {#DIM} = {#DIMVALUE} within all the values of {#DIM}, to compare them. Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].share_today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "kpi"
+                                    },
+                                    {
+                                        "tag": "dimension",
+                                        "value": "{#DIM}"
+                                    },
+                                    {
+                                        "tag": "kind",
+                                        "value": "{#KIND}"
+                                    },
+                                    {
+                                        "tag": "kpi",
+                                        "value": "{#METRIC}"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "{#DIM}",
+                                        "value": "{#DIMVALUE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "05728b2b292d468eb7bc7f652365ed67",
+                                "name": "KPI {#METRIC} {#DIM}={#DIMVALUE} ({#SERVICE}): rank today",
+                                "type": "DEPENDENT",
+                                "key": "apm.kpi.rank.today[\"{#SERVICE}\",\"{#METRIC}\",\"{#DIM}\",\"{#DIMVALUE}\"]",
+                                "history": "31d",
+                                "value_type": "FLOAT",
+                                "units": "",
+                                "description": "{#DESCRIPTION} for {#DIM} = {#DIMVALUE}: position of {#DIMVALUE} among the values of {#DIM} by today (1 = the largest). Calculated from ClickHouse, so it is complete even for an item created today (ClickHouse keeps 3 days by default).",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.data[?(@.service=='{#SERVICE}' && @.metric=='{#METRIC}' && @.dim_key=='{#DIM}' && @.dim_value=='{#DIMVALUE}')].rank_today.first()"
+                                        ],
+                                        "error_handler": "DISCARD_VALUE"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "apm.kpi.totals.get"
+                                },
                                 "tags": [
                                     {
                                         "tag": "component",
@@ -929,7 +1521,7 @@
                                     {
                                         "operationobject": "ITEM_PROTOTYPE",
                                         "operator": "REGEXP",
-                                        "value": ": (last hour|per hour|today|yesterday)$",
+                                        "value": ": (last hour|last 24 hours|per hour|last 7 days|today|yesterday|total \\(counter\\)|share today|rank today)$",
                                         "discover": "NO_DISCOVER"
                                     }
                                 ]
@@ -950,7 +1542,7 @@
                                     {
                                         "operationobject": "ITEM_PROTOTYPE",
                                         "operator": "REGEXP",
-                                        "value": ": (sum per minute|sum today|average last hour)$",
+                                        "value": ": (sum per minute|sum today|sum yesterday|average today)$",
                                         "discover": "NO_DISCOVER"
                                     }
                                 ]
@@ -988,6 +1580,16 @@
                         "macro": "{$APM.KPI.LIMIT}",
                         "value": "1000",
                         "description": "Maximum number of rows (metrics plus attribute values) returned by the query."
+                    },
+                    {
+                        "macro": "{$APM.KPI.TIMEZONE}",
+                        "value": "UTC",
+                        "description": "Time zone of the days of \"today\" and \"yesterday\", e.g. America/La_Paz (IANA name, as ClickHouse knows it)."
+                    },
+                    {
+                        "macro": "{$APM.KPI.TOTALS.INTERVAL}",
+                        "value": "2m",
+                        "description": "Update interval of the totals (last hour, last 24 hours, today, yesterday, total of the counter, share and rank), read from ClickHouse."
                     },
                     {
                         "macro": "{$APM.KPI.METRIC.MATCHES}",

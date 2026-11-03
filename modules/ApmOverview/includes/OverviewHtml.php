@@ -1034,7 +1034,13 @@ class OverviewHtml {
 								->addClass('apm-kpi-share-bar')
 								->setAttribute('style', sprintf('width: %.1f%%;', max(0, $value['total']) / $max * 100))
 						))->addClass('apm-kpi-share-track'),
-						(new CDiv(BusinessMetrics::format($value['total'], $unit)))->addClass('apm-kpi-share-value')
+						(new CDiv([
+							BusinessMetrics::format($value['total'], $unit),
+							// The share of a percentage (e.g. occupancy) means nothing.
+							$total > 0 && $unit !== '%'
+								? (new CSpan(sprintf(' · %.0f %%', $value['total'] / $total * 100)))->addClass(ZBX_STYLE_GREY)
+								: null
+						]))->addClass('apm-kpi-share-value')
 					]))
 						->addClass('apm-kpi-share')
 						->setTitle($total > 0
