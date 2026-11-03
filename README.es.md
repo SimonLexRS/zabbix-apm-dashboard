@@ -50,6 +50,7 @@ Módulos, plantillas y guías que convierten a Zabbix 8.0 en una plataforma de *
 | ¿Qué error se repite? | **Errores agrupados**, con veces, última aparición y traza | APM → Overview |
 | ¿Dónde se pierde el tiempo? | **Origen de la lentitud:** código, base de datos u otros servicios, con cascadas y consultas costosas | APM → Overview |
 | ¿Qué viven mis usuarios? | **RUM:** sesiones hasta el backend, cargas de página, recursos y Core Web Vitals | APM → Real user monitoring |
+| ¿Cuántos pedidos tuvo hoy cada tienda? | **KPIs de negocio:** los contadores de tu aplicación (pedidos, reservas, pagos) por atributo, como ítems de Zabbix que el asistente puede leer | APM → Overview, host `apm-<aplicación>` |
 | ¿Puedo verlo junto a mi monitoreo? | **Widgets** APM service map y APM service health | Dashboards |
 | ¿Me avisa si algo va mal? | **Plantilla** con items, triggers y dashboard por aplicación | Host `apm-<aplicación>` |
 | ¿Cómo conecto mi aplicación? | **Guía interactiva por lenguaje**, con comprobaciones en vivo | APM → Overview → Cómo funciona |
@@ -91,6 +92,7 @@ python3 scripts/verify-app.py shop              # all checks passed
 | Instalar solo los módulos | [Módulos](docs/install-module.es.md) |
 | Conectar mi aplicación | [Agregar una aplicación](docs/add-application.es.md) y [ejemplos por stack](#ejemplos-por-stack) |
 | Monitorear los navegadores de mis usuarios | [RUM: implementación y testing](docs/rum.es.md) |
+| Seguir ventas, reservas o cualquier número del negocio | [KPIs de negocio](docs/business-kpis.es.md) |
 
 Laboratorio, sin instalar nada en tu Zabbix:
 
@@ -107,6 +109,8 @@ cd examples/lab && cp .env.example .env && docker compose up -d --build && pytho
 | ![Servicios](docs/screenshots/otel-demo-services.png) | ![Tienda](docs/screenshots/otel-demo-store.png) |
 | **Línea de tiempo de una sesión de RUM** | **Widget del mapa en un dashboard** |
 | ![Sesión](docs/screenshots/rum-session.png) | ![Widget](docs/screenshots/service-map-widget.png) |
+| **KPIs de negocio: pedidos e ingresos por tienda** | **Reservas por hotel, tema oscuro** |
+| ![KPIs de negocio](docs/screenshots/business-kpis.png) | ![KPIs de negocio, oscuro](docs/screenshots/business-kpis-dark.png) |
 
 Más: [experiencia del usuario](docs/screenshots/user-experience.png) y [origen de la lentitud](docs/screenshots/origin-of-slowness-dark.png).
 
@@ -117,6 +121,7 @@ Más: [experiencia del usuario](docs/screenshots/user-experience.png) y [origen 
 - **Mapa de servicios**: el estado del sistema ahora (tráfico de entrada, tasa de error, servicio más lento, qué requiere atención) y el flujo en vivo de los usuarios a los servicios, bases de datos y servicios externos. Las flechas se colorean por salud, son tan gruesas como su tráfico y tienen partículas en movimiento; pasa el ratón por un servicio para seguir su camino y ver sus cifras, y haz clic para ver dónde se va su tiempo.
 - **Servicios / Endpoints**: métricas RED (tasa, errores, duración) con tendencias por minuto.
 - **Errores**: fallos agrupados por servicio, endpoint y mensaje, con veces, primera y última vez y la última traza.
+- **KPIs de negocio**: los contadores, indicadores e histogramas que envía la aplicación (pedidos, reservas, ingresos), con su total del periodo, tendencia y desglose por atributo ([docs/business-kpis.es.md](docs/business-kpis.es.md)).
 - **Experiencia del usuario**: Core Web Vitals ([docs/rum.es.md](docs/rum.es.md)), Apdex por servicio y endpoint, e histogramas de latencia.
 - **Origen de la lentitud**: tiempo por endpoint (código propio / base de datos / otros servicios), las peticiones más lentas con su cascada de spans, las consultas más costosas y los endpoints más lentos que en el periodo anterior.
 
@@ -132,10 +137,12 @@ El filtro de servicio acepta un texto contenido (`checkout`), un comodín (`demo
 | `modules/ApmServiceMap`, `modules/ApmServiceHealth` | Widgets de dashboard, con campo *Aplicación* |
 | `templates/otel_application_otlp.json` | **OpenTelemetry application by OTLP**: el oficial *Generic OpenTelemetry by OTLP* limitado a una aplicación. [Detalles](docs/apm-template.es.md) |
 | `templates/apm_services_clickhouse_http.yaml` | Opcional: items y triggers por servicio, endpoint y conexión (tasa de error, p95, Apdex) |
+| `templates/apm_business_metrics_clickhouse_http.json` | **APM business metrics by ClickHouse HTTP**: descubre las métricas de negocio de una aplicación y cada valor de sus atributos, minuto a minuto y con totales diarios. [Detalles](docs/business-kpis.es.md) |
 | `scripts/install.sh`, `scripts/enable-modules.py` | Instalan y habilitan los módulos |
 | `scripts/zabbix-apm-app.py` | Da de alta una aplicación por API: plantilla, host y macros. Idempotente |
 | `scripts/verify-app.py` | Comprueba una aplicación de punta a punta y compara Zabbix con ClickHouse |
 | `scripts/test-rum.py` | Comprueba los datos del navegador y puede enviar Web Vitals sintéticos |
+| `scripts/kpi-demo.py` | Envía una tienda y una cadena de hoteles con métricas de negocio, para probar los KPIs |
 
 ### Ejemplos por stack
 
@@ -164,6 +171,7 @@ El filtro de servicio acepta un texto contenido (`checkout`), un comodín (`demo
 |---|---|
 | [Agregar una aplicación](docs/add-application.es.md) | Instrumentar, llegar al Collector, crear el host y verificar |
 | [Monitoreo de usuarios reales](docs/rum.es.md) | Cómo funciona, cómo se implementa y cómo hacer testing |
+| [KPIs de negocio](docs/business-kpis.es.md) | Pedidos, reservas o pagos como ítems de Zabbix, por atributo, para dashboards y el asistente |
 | [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.es.md) | La tienda de prueba, con sus problemas y soluciones |
 
 | Referencia | |

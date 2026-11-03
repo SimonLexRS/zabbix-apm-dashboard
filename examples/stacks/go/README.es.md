@@ -14,6 +14,7 @@ contexto.
 | Cliente HTTP | `otelhttp.NewTransport` | spans de cliente y contexto W3C hacia el servicio llamado (flechas del mapa) |
 | Logs | `telemetry.SlogHandler` (puente `otelslog`) | cada registro de `slog` como log OTLP, con los ids de traza y span |
 | Runtime | `contrib/instrumentation/runtime` | métricas de goroutines, GC y memoria |
+| Métricas de negocio | `otel.Meter` (`main.go`, `POST /order?store=Centro`) | contadores `shop.orders` y `shop.revenue` por `shop.store`: los [KPIs de negocio](../../../docs/business-kpis.es.md) |
 | PostgreSQL (pgx) | `github.com/exaring/otelpgx` | spans de cliente por sentencia con `db.system.name` (nodo de base de datos en el mapa) |
 
 ## 1. Dependencias
@@ -72,10 +73,11 @@ docker run -d --name apm-go-example -p 8080:8080 \
   -e SELF_LOAD=1 apm-go-example
 ```
 
-`SELF_LOAD=1` llama cuatro veces por segundo, a través del cliente instrumentado, a `/hello`, a `/slow` (200–800 ms) y
-a `/fail` (HTTP 500). Qué verás en Zabbix:
-- en menos de un minuto, una pestaña **go-example** en **APM → Overview**;
-- tras `zabbix-apm-app.py add go-example`, el host **apm-go-example**, con una tasa de error en torno al 17 % (una
-  llamada de cada seis falla);
+`SELF_LOAD=1` llama cuatro veces por segundo, a través del cliente instrumentado, a `/hello`, a `/slow` (200–800 ms),
+a `/fail` (HTTP 500) y a `POST /order`. Qué verás en Zabbix:
+- en menos de un minuto, una pestaña **go-example** en **APM → Overview**, con los pedidos por tienda en **KPIs de
+  negocio**;
+- tras `zabbix-apm-app.py add go-example`, el host **apm-go-example**, con una tasa de error en torno al 12 % (una
+  llamada de cada ocho falla);
 - y `verify-app.py go-example` terminando con `all checks passed` ([verification.es.md](../../../docs/verification.es.md)).
 

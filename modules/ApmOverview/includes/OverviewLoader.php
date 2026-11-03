@@ -68,6 +68,16 @@ class OverviewLoader {
 					$data['errors'] = $stats->getErrorGroups($time_from, $time_till, $service, self::ERROR_LIMIT);
 					break;
 
+				case OverviewHtml::TAB_KPI:
+					$data['application'] = $filter['application'];
+					$data['minutes'] = ($time_till - $time_from) / SEC_PER_MIN;
+					$data['denied'] = !in_array('metrics', ApmAccess::signals(), true);
+					$data['kpis'] = $data['denied'] ? [] : $stats->getBusinessMetrics($time_from, $time_till, $service);
+					$data['host'] = $filter['application'] !== null && $filter['application'] !== ''
+						? self::findHost($filter['application'])
+						: null;
+					break;
+
 				case OverviewHtml::TAB_UX:
 					// Web Vitals are log records: only for roles with APM → Logs.
 					$no_vitals = ['overall' => [], 'pages' => [], 'devices' => [], 'hourly' => []];
@@ -124,7 +134,7 @@ class OverviewLoader {
 	 * The Zabbix host of an application (apm-<namespace>, see scripts/zabbix-apm-app.py), with the permissions of the
 	 * current user.
 	 *
-	 * @return array|null  ['hostid', 'name', 'template' => bool, 'namespace' => ?string]
+	 * @return array|null  ['hostid', 'name', 'template' => bool, 'kpi' => bool, 'namespace' => ?string]
 	 */
 	private static function findHost(string $application): ?array {
 		$hosts = API::Host()->get([
@@ -143,10 +153,13 @@ class OverviewLoader {
 			static fn(array $macro): bool => $macro['macro'] === '{$OTLP.NAMESPACE}'
 		));
 
+		$templates = array_column($host['parentTemplates'], 'host');
+
 		return [
 			'hostid' => $host['hostid'],
 			'name' => $host['name'],
-			'template' => in_array('OpenTelemetry application by OTLP', array_column($host['parentTemplates'], 'host'), true),
+			'template' => in_array('OpenTelemetry application by OTLP', $templates, true),
+			'kpi' => in_array('APM business metrics by ClickHouse HTTP', $templates, true),
 			'namespace' => $macro ? $macro[0]['value'] : null
 		];
 	}

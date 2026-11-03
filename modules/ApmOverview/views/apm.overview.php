@@ -146,6 +146,8 @@ $errors_tab = [
 	$block(OverviewHtml::TAB_ERRORS)
 ];
 
+$kpi_tab = $block(OverviewHtml::TAB_KPI);
+
 $ux_tab = $block(OverviewHtml::TAB_UX);
 
 $slow_tab = $block(OverviewHtml::TAB_SLOW);
@@ -313,6 +315,7 @@ $tabs = (new CTabView())
 	->addTab('apm-services', I18n::t('Services'), $services_tab)
 	->addTab('apm-endpoints', 'Endpoints', $endpoints_tab)
 	->addTab('apm-errors', I18n::t('Errors'), $errors_tab)
+	->addTab('apm-kpi', I18n::t('Business KPIs'), $kpi_tab)
 	->addTab('apm-ux', I18n::t('User experience'), $ux_tab)
 	->addTab('apm-slow', I18n::t('Origin of slowness'), $slow_tab)
 	->addTab('apm-howto', I18n::t('How it works'), $howto_tab);

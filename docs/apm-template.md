@@ -28,7 +28,7 @@ Every minute (`{$OTLP.FREQUENCY}`), over the 60 s (`{$OTLP.GRANULARITY}`) that e
 | Span: Ok / Error / Unset duration | Average duration of those spans, in seconds. *Unset duration* is the typical latency of the application. |
 | Span: Error percentage | Error / (Ok + Error + Unset) × 100. |
 | Logs: Info / Warning / Error / Fatal entries count | Log records per severity (from `Get logs`, one query). |
-| Metrics: Count, Gauge count, Histogram count | Metric data points received: shows that metrics are arriving. |
+| Metrics: Count, Gauge count, Histogram count | Metric data points received: shows that metrics are arriving. Their values (orders, reservations...) are the [business KPIs](business-kpis.md), with their own template. |
 | System: Uptime | `system.uptime` metric, if the application sends it. |
 
 Counts are stored only when they change, with a 1 h heartbeat (the official template's *discard unchanged*): an

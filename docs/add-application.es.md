@@ -106,6 +106,14 @@ Ajusta los macros en el host de cada aplicación. Para alertas por servicio y po
 **APM services by ClickHouse HTTP v2** ([installation.md](installation.md#6-template-alerts-and-history)) con
 `{$APM.SERVICE.MATCHES}` limitado a los servicios de la aplicación.
 
+Si la aplicación envía métricas de negocio (pedidos, reservas, pagos), añade `--kpi`: el host recibe además un ítem por
+métrica y por cada valor de sus atributos, con totales diarios ([business-kpis.es.md](business-kpis.es.md)):
+
+```sh
+CH_URL=http://<clickhouse>:8123/ CH_USER=zabbix_ro CH_PASSWORD=<contraseña-de-lectura> \
+  python3 scripts/zabbix-apm-app.py add flowspock --kpi
+```
+
 Compruébalo de punta a punta (a los 3-4 minutos; ver [verification.es.md](verification.es.md)):
 
 ```sh
@@ -116,8 +124,8 @@ Detalles del template y cómo ajustarlo: [apm-template.es.md](apm-template.es.md
 
 ## 4. Verla
 
-- **APM → Overview**: elige la pestaña de la aplicación (mapa de servicios, servicios, endpoints, errores, experiencia
-  del usuario, origen de la lentitud).
+- **APM → Overview**: elige la pestaña de la aplicación (mapa de servicios, servicios, endpoints, errores, KPIs de
+  negocio, experiencia del usuario, origen de la lentitud).
 - Dashboards: los widgets **APM service health** y **APM service map** tienen un campo **Aplicación**.
 - **Monitoring → Hosts → apm-&lt;app&gt;**: últimos datos, gráficos y problemas del template.
 

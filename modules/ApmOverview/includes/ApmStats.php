@@ -292,6 +292,48 @@ class ApmStats {
 	}
 
 	/**
+	 * Business metrics (KPIs) of the period: totals per metric and per value of its attributes, and the per-minute
+	 * values of the last $minutes complete minutes. See BusinessMetrics.
+	 *
+	 * @param string $service  Service name pattern, "*" is a wildcard. Empty string matches all services.
+	 *
+	 * @return array  BusinessMetrics::groupTotals(), each metric with 'series' (float[], oldest first, or null when the
+	 *                period is too short).
+	 */
+	public function getBusinessMetrics(int $time_from, int $time_till, string $service = '',
+			int $minutes = self::SERIES_MINUTES): array {
+		$access = $this->applicationCondition(ApmAccess::METRICS);
+		$service_condition = $service !== '' ? ' AND ServiceName LIKE {service:String}' : '';
+		$params = BusinessMetrics::params();
+
+		$metrics = BusinessMetrics::groupTotals(
+			$this->fetch(BusinessMetrics::totalsSql($access, $service_condition), $time_from, $time_till, $service,
+				$params
+			)
+		);
+
+		$window = self::getSeriesWindow($time_from, $time_till, $minutes);
+		$series = [];
+
+		if ($metrics && $window !== null) {
+			[$series_from, $series_till, $buckets] = $window;
+			$series = BusinessMetrics::groupSeries(
+				$this->fetch(BusinessMetrics::seriesSql($access, $service_condition), $buckets[0], $series_till,
+					$service, $params
+				),
+				$buckets
+			);
+		}
+
+		foreach ($metrics as $key => &$metric) {
+			$metric['series'] = $window !== null ? ($series[$key] ?? array_fill(0, count($window[2]), 0.0)) : null;
+		}
+		unset($metric);
+
+		return $metrics;
+	}
+
+	/**
 	 * RED statistics per endpoint: server spans (SpanKind = 'Server') grouped by service and span name.
 	 *
 	 * @param string $service        Service name pattern, "*" is a wildcard. Empty string matches all services.

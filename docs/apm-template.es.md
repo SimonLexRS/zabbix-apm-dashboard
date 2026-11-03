@@ -28,7 +28,7 @@ Cada minuto (`{$OTLP.FREQUENCY}`), sobre los 60 s (`{$OTLP.GRANULARITY}`) que te
 | Span: Ok / Error / Unset duration | Duración media de esos spans, en segundos. *Unset duration* es la latencia típica de la aplicación. |
 | Span: Error percentage | Error / (Ok + Error + Unset) × 100. |
 | Logs: Info / Warning / Error / Fatal entries count | Registros de log por severidad (de `Get logs`, una sola consulta). |
-| Metrics: Count, Gauge count, Histogram count | Puntos de métricas recibidos: indica que llegan métricas. |
+| Metrics: Count, Gauge count, Histogram count | Puntos de métricas recibidos: indica que llegan métricas. Sus valores (pedidos, reservas…) son los [KPIs de negocio](business-kpis.es.md), con su propio template. |
 | System: Uptime | Métrica `system.uptime`, si la aplicación la envía. |
 
 Los conteos solo se guardan cuando cambian, con un latido de 1 h (el *discard unchanged* del template oficial). Una

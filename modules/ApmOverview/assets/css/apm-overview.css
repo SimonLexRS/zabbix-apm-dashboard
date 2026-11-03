@@ -1187,3 +1187,98 @@ html[color-scheme="dark"] .apm-rum-panel {
 	margin: 4px 0 12px 18px;
 	list-style: disc;
 }
+
+/* Business KPIs: one table per service, the breakdown of each metric as bars per attribute. */
+.apm-kpi-service {
+	margin-bottom: 16px;
+}
+
+.apm-kpi-table .apm-kpi-name {
+	min-width: 180px;
+}
+
+.apm-kpi-metric,
+.apm-kpi-value {
+	font-weight: bold;
+}
+
+
+.apm-kpi-dim summary {
+	cursor: pointer;
+	margin: 2px 0;
+}
+
+.apm-kpi-dim + .apm-kpi-dim {
+	margin-top: 4px;
+}
+
+.apm-kpi-shares {
+	display: grid;
+	gap: 4px;
+	margin: 4px 0 6px;
+}
+
+.apm-kpi-share {
+	display: grid;
+	grid-template-columns: minmax(70px, 140px) minmax(40px, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+}
+
+.apm-kpi-share-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.apm-kpi-share-track {
+	height: 8px;
+	border-radius: 4px;
+	background-color: rgba(128, 128, 128, 0.18);
+	overflow: hidden;
+}
+
+.apm-kpi-share-bar {
+	height: 100%;
+	background-color: #3b82f6;
+}
+
+.apm-kpi-share-value {
+	min-width: 56px;
+	text-align: right;
+	white-space: nowrap;
+}
+
+.apm-kpi-empty .apm-kpi-code {
+	max-width: 900px;
+	margin: 8px 0;
+}
+
+/* The same columns in every service table, so that they line up. */
+.apm-kpi-table {
+	table-layout: fixed;
+}
+
+.apm-kpi-table th:nth-child(1) {
+	width: 24%;
+}
+
+.apm-kpi-table th:nth-child(2) {
+	width: 15%;
+}
+
+.apm-kpi-table th:nth-child(3) {
+	width: 9%;
+}
+
+.apm-kpi-table th:nth-child(4) {
+	width: 124px;
+}
+
+.apm-kpi-table th:nth-child(6) {
+	width: 56px;
+}
+
+.apm-kpi-table td {
+	overflow-wrap: anywhere;
+}

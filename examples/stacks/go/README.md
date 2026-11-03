@@ -13,6 +13,7 @@ into your project and follow the three steps; [main.go](main.go) shows them in c
 | HTTP client | `otelhttp.NewTransport` | client spans and W3C trace context to the called service (service map arrows) |
 | Logs | `telemetry.SlogHandler` (`otelslog` bridge) | every `slog` record as an OTLP log, with the trace and span ids |
 | Runtime | `contrib/instrumentation/runtime` | goroutines, GC and memory metrics |
+| Business metrics | `otel.Meter` (`main.go`, `POST /order?store=Centro`) | counters `shop.orders` and `shop.revenue` by `shop.store`: the [business KPIs](../../../docs/business-kpis.md) |
 | PostgreSQL (pgx) | `github.com/exaring/otelpgx` | client spans per statement with `db.system.name` (database node on the map) |
 
 ## 1. Dependencies
@@ -69,8 +70,9 @@ docker run -d --name apm-go-example -p 8080:8080 \
   -e SELF_LOAD=1 apm-go-example
 ```
 
-`SELF_LOAD=1` calls `/hello`, `/slow` (200–800 ms) and `/fail` (HTTP 500) four times per second through the
-instrumented client. In Zabbix: a **go-example** tab in **APM → Overview** within a minute; after
-`zabbix-apm-app.py add go-example`, the host **apm-go-example** with an error rate around 17 % (one call in six fails)
+`SELF_LOAD=1` calls `/hello`, `/slow` (200–800 ms), `/fail` (HTTP 500) and `POST /order` four times per second through
+the instrumented client. In Zabbix: a **go-example** tab in **APM → Overview** within a minute, with orders by store in
+**Business KPIs**; after `zabbix-apm-app.py add go-example`, the host **apm-go-example** with an error rate around 12 %
+(one call in eight fails)
 and `verify-app.py go-example` → `all checks passed` ([verification.md](../../../docs/verification.md)).
 

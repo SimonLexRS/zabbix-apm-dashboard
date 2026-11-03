@@ -1,7 +1,8 @@
 <?php declare(strict_types = 0);
 
 /*
- * Checks that run without Zabbix (php tests/run.php): service patterns, service map graph and layers, translations.
+ * Checks that run without Zabbix (php tests/run.php): service patterns, service map graph and layers, business metrics
+ * and their template, translations.
  * Exit code 1 on the first failure.
  */
 
@@ -18,6 +19,7 @@ namespace {
 	require $root.'/ApmOverview/includes/Rum.php';
 	require $root.'/ApmOverview/includes/ServiceMap.php';
 	require $root.'/ApmOverview/includes/Integration.php';
+	require $root.'/ApmOverview/includes/BusinessMetrics.php';
 
 	$failures = 0;
 
@@ -245,6 +247,69 @@ namespace Modules\ApmOverview\Includes {
 	$ordered = ServiceMap::orderColumns($order_nodes, $order_edges);
 	check('crossings after ordering', ServiceMap::crossings($ordered, $order_nodes, $order_edges), 0);
 	check('ordering deterministic', ServiceMap::orderColumns($order_nodes, $order_edges), $ordered);
+
+	// Business metrics: the tab and the template measure with the same default filters.
+	$kpi_template = json_decode(file_get_contents(dirname(__DIR__).'/templates/apm_business_metrics_clickhouse_http.json'),
+		true
+	)['zabbix_export']['templates'][0];
+	$kpi_macros = array_column($kpi_template['macros'], 'value', 'macro');
+	check('kpi metric filter = template', $kpi_macros['{$APM.KPI.METRIC.NOT_MATCHES}'] ?? null,
+		BusinessMetrics::METRIC_NOT_MATCHES
+	);
+	check('kpi dimension filter = template', $kpi_macros['{$APM.KPI.DIMENSION.NOT_MATCHES}'] ?? null,
+		BusinessMetrics::DIMENSION_NOT_MATCHES
+	);
+	check('kpi metric filter excludes the instrumentation', array_map(
+		static fn(string $name): bool => (bool) preg_match('/'.BusinessMetrics::METRIC_NOT_MATCHES.'/', $name),
+		['http.server.request.duration', 'go.memory.used', 'otel.sdk.span.live', 'shop.orders', 'hotel.reservations',
+			'demo.payment.transactions'
+		]
+	), [true, true, true, false, false, false]);
+	check('kpi dimension filter excludes identifiers', array_map(
+		static fn(string $key): bool => (bool) preg_match('/'.BusinessMetrics::DIMENSION_NOT_MATCHES.'/', $key),
+		['user.id', 'session_id', 'client.address', 'shop.store', 'hotel.name', 'demo.payment.currency']
+	), [true, true, true, false, false, false]);
+
+	$rules = array_column($kpi_template['discovery_rules'], null, 'key');
+	check('kpi discovery rules', array_keys($rules), ['apm.kpi.discovery', 'apm.kpi.dimension.discovery']);
+	check('kpi per-value item keys', array_column($rules['apm.kpi.dimension.discovery']['item_prototypes'], 'key')[0],
+		'apm.kpi.value["{#SERVICE}","{#METRIC}","{#DIM}","{#DIMVALUE}"]'
+	);
+	check('kpi items tagged for the assistant', in_array(['tag' => 'component', 'value' => 'kpi'],
+		$rules['apm.kpi.discovery']['item_prototypes'][0]['tags'], true
+	), true);
+
+	foreach ([BusinessMetrics::totalsSql(' AND x=1', ''), BusinessMetrics::seriesSql(' AND x=1', '')] as $i => $sql) {
+		check('kpi sql '.$i.' has the access condition in the three tables', substr_count($sql, ' AND x=1'), 3);
+		check('kpi sql '.$i.' placeholders replaced', preg_match('/\{(access|points|service)\}/', $sql), 0);
+	}
+
+	$kpi_rows = [
+		['service' => 'shop', 'metric' => 'shop.orders', 'kind' => 'counter', 'unit' => '', 'description' => 'Orders',
+			'dim_key' => '', 'dim_value' => '', 'value' => '12', 'sum' => '0', 'last' => '100'],
+		['service' => 'shop', 'metric' => 'shop.orders', 'kind' => 'counter', 'unit' => '', 'description' => 'Orders',
+			'dim_key' => 'shop.store', 'dim_value' => 'Centro', 'value' => '8', 'sum' => '0', 'last' => '100'],
+		['service' => 'shop', 'metric' => 'shop.orders', 'kind' => 'counter', 'unit' => '', 'description' => 'Orders',
+			'dim_key' => 'shop.store', 'dim_value' => 'Sur', 'value' => '4', 'sum' => '0', 'last' => '100'],
+		// A value whose metric total is not in the rows (cut by the limit) is ignored.
+		['service' => 'shop', 'metric' => 'other', 'kind' => 'gauge', 'unit' => '', 'description' => '',
+			'dim_key' => 'k', 'dim_value' => 'v', 'value' => '1', 'sum' => '0', 'last' => '100']
+	];
+	$kpi_totals = BusinessMetrics::groupTotals($kpi_rows);
+	check('kpi totals grouped', array_keys($kpi_totals), [BusinessMetrics::key('shop', 'shop.orders', 'counter')]);
+	check('kpi breakdown', reset($kpi_totals)['dims'], ['shop.store' => [
+		['value' => 'Centro', 'total' => 8.0], ['value' => 'Sur', 'total' => 4.0]
+	]]);
+	check('kpi series: counters 0 when quiet, gauges keep their value', BusinessMetrics::groupSeries([
+		['service' => 's', 'metric' => 'c', 'kind' => 'counter', 'bucket' => '60', 'value' => '3'],
+		['service' => 's', 'metric' => 'g', 'kind' => 'gauge', 'bucket' => '60', 'value' => '7']
+	], [0, 60, 120]), [
+		BusinessMetrics::key('s', 'c', 'counter') => [0.0, 3.0, 0.0],
+		BusinessMetrics::key('s', 'g', 'gauge') => [0.0, 7.0, 7.0]
+	]);
+	check('kpi format', array_map(static fn(float $v): string => BusinessMetrics::format($v, 'USD'),
+		[12.0, 12.345, 1234.5, 0.00134, 2500000.0]
+	), ['12 USD', '12.35 USD', '1 235 USD', '0.00134 USD', '2.50 M USD']);
 
 	// Translations: Spanish by catalog, English as is.
 	I18n::setLanguage('es');

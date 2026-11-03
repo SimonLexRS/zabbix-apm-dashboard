@@ -27,18 +27,19 @@ class OverviewHtml {
 	public const TAB_SERVICES = 'services';
 	public const TAB_ENDPOINTS = 'endpoints';
 	public const TAB_ERRORS = 'errors';
+	public const TAB_KPI = 'kpi';
 	public const TAB_UX = 'ux';
 	public const TAB_SLOW = 'slow';
 	public const TAB_HOWTO = 'howto';
 
 	// Display order of the tabs.
 	public const TABS = [self::TAB_STATUS, self::TAB_MAP, self::TAB_SERVICES, self::TAB_ENDPOINTS, self::TAB_ERRORS,
-		self::TAB_UX, self::TAB_SLOW, self::TAB_HOWTO
+		self::TAB_KPI, self::TAB_UX, self::TAB_SLOW, self::TAB_HOWTO
 	];
 
 	// Tabs with a refreshable block (in "How it works" only the checks of the application refresh, not the guide).
 	public const DATA_TABS = [self::TAB_STATUS, self::TAB_MAP, self::TAB_SERVICES, self::TAB_ENDPOINTS,
-		self::TAB_ERRORS, self::TAB_UX, self::TAB_SLOW, self::TAB_HOWTO
+		self::TAB_ERRORS, self::TAB_KPI, self::TAB_UX, self::TAB_SLOW, self::TAB_HOWTO
 	];
 
 	// Window of the "is it working" checks of the How it works tab.
@@ -83,6 +84,7 @@ class OverviewHtml {
 			self::TAB_SERVICES => self::services($data, $ctx),
 			self::TAB_ENDPOINTS => self::endpoints($data, $ctx),
 			self::TAB_ERRORS => self::errors($data, $ctx),
+			self::TAB_KPI => self::kpis($data, $ctx),
 			self::TAB_UX => self::userExperience($data, $ctx),
 			self::TAB_SLOW => self::slowness($data, $ctx),
 			self::TAB_HOWTO => self::howto($data, $ctx),
@@ -891,6 +893,234 @@ class OverviewHtml {
 		);
 
 		return $block;
+	}
+
+	/**
+	 * Business metrics (KPIs) of the application: one table per service, each metric with its total of the period
+	 * (or current value), its trend and its breakdown by attribute (e.g. orders by store).
+	 *
+	 * @param array $data  ['kpis' => ApmStats::getBusinessMetrics(), 'denied' => bool, 'host' => ?array,
+	 *                     'minutes' => float, 'application' => ?string]
+	 */
+	public static function kpis(array $data, array $ctx): CDiv {
+		$block = new CDiv();
+
+		if ($data['denied'] ?? false) {
+			return $block->addItem(self::hint(I18n::t('Your user role has no access to APM → Metrics, where the business metrics come from.')));
+		}
+
+		$block->addItem(self::kpiHost($data));
+
+		if (!$data['kpis']) {
+			return $block->addItem(self::kpiEmpty());
+		}
+
+		$services = [];
+
+		foreach ($data['kpis'] as $metric) {
+			$services[$metric['service']][] = $metric;
+		}
+
+		$minutes = max(1, $data['minutes']);
+		$series_minutes = 0;
+
+		foreach ($data['kpis'] as $metric) {
+			$series_minutes = $metric['series'] !== null ? count($metric['series']) : 0;
+			break;
+		}
+
+		foreach ($services as $service => $metrics) {
+			$table = (new CTableInfo())
+				->setHeader([
+					I18n::t('Metric'),
+					I18n::t('Period total'),
+					I18n::t('Per minute'),
+					$series_minutes > 0 ? sprintf(I18n::t('Trend (%d min)'), $series_minutes) : I18n::t('Trend'),
+					I18n::t('Breakdown'),
+					''
+				])
+				->addClass('apm-kpi-table');
+
+			foreach ($metrics as $metric) {
+				$table->addRow([
+					(new CCol(self::kpiName($metric)))->addClass('apm-kpi-name'),
+					(new CCol(self::kpiValue($metric)))->addClass(ZBX_STYLE_NOWRAP),
+					BusinessMetrics::isTotal($metric['kind'])
+						? BusinessMetrics::format($metric['value'] / $minutes, $metric['kind'] === BusinessMetrics::KIND_HISTOGRAM ? '' : $metric['unit'])
+						: '—',
+					$metric['series'] !== null
+						? self::sparkline($metric['series'], 'apm-spark-requests', sprintf(
+							BusinessMetrics::isTotal($metric['kind'])
+								? I18n::t('Per minute (max %s)')
+								: I18n::t('Value per minute (max %s)'),
+							BusinessMetrics::format(max($metric['series']), $metric['kind'] === BusinessMetrics::KIND_HISTOGRAM ? '' : $metric['unit'])
+						))
+						: '',
+					(new CCol(self::kpiBreakdown($metric)))->addClass('apm-kpi-breakdown-cell'),
+					self::kpiItemsLink($data, $metric)
+				]);
+			}
+
+			$block->addItem(
+				(new CSection($table))
+					->setHeader(new CTag('h4', true, $service))
+					->addClass('apm-kpi-service')
+			);
+		}
+
+		return $block;
+	}
+
+	private static function kpiName(array $metric): array {
+		$kinds = [
+			BusinessMetrics::KIND_COUNTER => I18n::t('counter'),
+			BusinessMetrics::KIND_UPDOWN => I18n::t('up-down counter'),
+			BusinessMetrics::KIND_GAUGE => I18n::t('gauge'),
+			BusinessMetrics::KIND_HISTOGRAM => I18n::t('histogram')
+		];
+		$details = array_filter([$kinds[$metric['kind']] ?? $metric['kind'],
+			$metric['description'] !== '' && $metric['description'] !== $metric['metric'] ? $metric['description'] : null
+		]);
+
+		return [
+			(new CSpan($metric['metric']))->addClass('apm-kpi-metric'),
+			(new CDiv(implode(' · ', $details)))->addClass(ZBX_STYLE_GREY)
+		];
+	}
+
+	private static function kpiValue(array $metric): array {
+		if ($metric['kind'] === BusinessMetrics::KIND_HISTOGRAM) {
+			$count = (int) round($metric['value']);
+
+			return [
+				(new CSpan(sprintf(I18n::t('%s measurements'), self::formatCount($count))))->addClass('apm-kpi-value'),
+				(new CDiv(sprintf(I18n::t('sum %s · average %s'),
+					BusinessMetrics::format($metric['sum'], $metric['unit']),
+					BusinessMetrics::format($count > 0 ? $metric['sum'] / $count : 0, $metric['unit'])
+				)))->addClass(ZBX_STYLE_GREY)
+			];
+		}
+
+		$value = (new CSpan(BusinessMetrics::format($metric['value'], $metric['unit'])))->addClass('apm-kpi-value');
+
+		return BusinessMetrics::isTotal($metric['kind'])
+			? [$value]
+			: [$value, (new CDiv(I18n::t('current value')))->addClass(ZBX_STYLE_GREY)];
+	}
+
+	/**
+	 * One bar list per attribute of the metric; the first one open.
+	 */
+	private static function kpiBreakdown(array $metric): array {
+		if (!$metric['dims']) {
+			return [(new CSpan(I18n::t('no attributes')))->addClass(ZBX_STYLE_GREY)];
+		}
+
+		$unit = $metric['kind'] === BusinessMetrics::KIND_HISTOGRAM ? '' : $metric['unit'];
+		$lists = [];
+
+		foreach ($metric['dims'] as $key => $values) {
+			$total = array_sum(array_column($values, 'total'));
+			$max = max(array_column($values, 'total')) ?: 1;
+			$rows = (new CDiv())->addClass('apm-kpi-shares');
+
+			foreach ($values as $value) {
+				$rows->addItem(
+					(new CDiv([
+						(new CDiv($value['value'] === '' ? I18n::t('(empty)') : $value['value']))
+							->addClass('apm-kpi-share-name'),
+						(new CDiv(
+							(new CDiv())
+								->addClass('apm-kpi-share-bar')
+								->setAttribute('style', sprintf('width: %.1f%%;', max(0, $value['total']) / $max * 100))
+						))->addClass('apm-kpi-share-track'),
+						(new CDiv(BusinessMetrics::format($value['total'], $unit)))->addClass('apm-kpi-share-value')
+					]))
+						->addClass('apm-kpi-share')
+						->setTitle($total > 0
+							? sprintf(I18n::t('%s = %s: %s (%.1f %% of the values shown)'), $key, $value['value'],
+								BusinessMetrics::format($value['total'], $unit), $value['total'] / $total * 100
+							)
+							: $key.' = '.$value['value']
+						)
+				);
+			}
+
+			$details = (new CTag('details', true, [
+				new CTag('summary', true, [$key, ' ', (new CSpan('('.count($values).')'))->addClass(ZBX_STYLE_GREY)]),
+				$rows
+			]))->addClass('apm-kpi-dim');
+
+			if (!$lists) {
+				$details->setAttribute('open', 'open');
+			}
+
+			$lists[] = $details;
+		}
+
+		return $lists;
+	}
+
+	/**
+	 * Link to the Zabbix items of a metric (template "APM business metrics by ClickHouse HTTP"), when the host has it.
+	 */
+	private static function kpiItemsLink(array $data, array $metric): CLink|string {
+		if (($data['host']['kpi'] ?? false) !== true) {
+			return '';
+		}
+
+		return (new CLink(I18n::t('Items'), (new CUrl('zabbix.php'))
+			->setArgument('action', 'latest.view')
+			->setArgument('hostids', [$data['host']['hostid']])
+			->setArgument('tags', [['tag' => 'kpi', 'value' => $metric['metric'], 'operator' => TAG_OPERATOR_EQUAL]])
+			->setArgument('filter_set', 1)
+		))->setTitle(I18n::t('History of this metric in Zabbix (Latest data)'));
+	}
+
+	/**
+	 * What the page shows and whether the KPIs are also Zabbix items (history, triggers, the assistant).
+	 */
+	private static function kpiHost(array $data): CDiv {
+		$text = I18n::t('Counters, gauges and histograms that the application sends besides those of the instrumentation (runtime, HTTP, database): orders, reservations, payments... Counters and histograms add up over the period; up-down counters and gauges show their current value. The breakdown shows the largest values of each attribute.');
+		$host = $data['host'] ?? null;
+		$application = $data['application'] ?? null;
+
+		if ($application === null || $application === '') {
+			return self::hint($text);
+		}
+
+		if ($host !== null && $host['kpi']) {
+			return self::hint($text.' '.sprintf(I18n::t('Zabbix keeps them minute by minute as items of %s, with the totals of the last hour, today and yesterday.'), $host['name']));
+		}
+
+		return (new CDiv([
+			$text.' ',
+			new CTag('strong', true, I18n::t('To keep them as Zabbix items')),
+			' ',
+			sprintf(I18n::t('(history, triggers, dashboards and the questions of the assistant), link the template "APM business metrics by ClickHouse HTTP" to %s:'), Integration::hostName($application)),
+			' ',
+			new CTag('code', true, 'python3 scripts/zabbix-apm-app.py add '.$application.' --kpi')
+		]))
+			->addClass(ZBX_STYLE_GREY)
+			->addClass('apm-overview-hint');
+	}
+
+	private static function kpiEmpty(): CDiv {
+		$code = implode("\n", [
+			'// Go: one counter, with a few known values per attribute',
+			'orders, _ := otel.Meter("shop").Int64Counter("shop.orders", metric.WithUnit("{order}"))',
+			'orders.Add(ctx, 1, metric.WithAttributes(attribute.String("shop.store", store)))',
+			'',
+			'# Python',
+			'orders = metrics.get_meter("shop").create_counter("shop.orders", unit="{order}")',
+			'orders.add(1, {"shop.store": store})'
+		]);
+
+		return (new CDiv([
+			self::hint(I18n::t('No business metrics in this period. Send them with the metrics API of the OpenTelemetry SDK, through the same exporter as the traces: counters for what happens (orders, reservations, payments), gauges for current levels. Each attribute (store, hotel, currency) becomes a breakdown; use attributes with a few known values, never IDs or e-mails.')),
+			(new CTag('pre', true, $code))->addClass('apm-overview-code')->addClass('apm-kpi-code'),
+			new CLink(I18n::t('Guide: business KPIs'), self::DOCS_URL.'/blob/main/docs/business-kpis.md')
+		]))->addClass('apm-kpi-empty');
 	}
 
 	/**

@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## 2.2.0
+
+- **Business KPIs:** the business metrics that an application sends over OpenTelemetry (orders by store, reservations by
+  hotel, payments by currency) become visible and Zabbix items ([docs/business-kpis.md](docs/business-kpis.md)).
+  - New tab **APM → Overview → Business KPIs**: each counter, up-down counter, gauge and histogram of the application,
+    except the instrumentation ones, with its total of the period, per minute, trend and breakdown by attribute.
+  - New template **APM business metrics by ClickHouse HTTP**: one query per minute discovers every metric and every
+    value of its attributes, with items per minute, last hour, today and yesterday (histograms: sum and average), tagged
+    `component: kpi` so that the assistant of zabbix-mcp finds them. Cumulative counters are measured by differences,
+    with restarts and several instances; gauges ignore instances that stopped.
+  - `scripts/zabbix-apm-app.py add <app> --kpi` links it and sets its macros (ClickHouse from `CH_URL`, `CH_USER`,
+    `CH_PASSWORD`, the password as a secret macro); `list` shows which hosts have it.
+  - `scripts/kpi-demo.py`: a store and a hotel chain with business metrics and a span per event, to try it.
+  - The Go example counts orders and revenue by store (`POST /order?store=Centro`).
+- `scripts/zabbix-apm-app.py`: `--timeshift` was read but never set; secret macros of the host keep their value on
+  updates.
 
 - **Installation guide rewritten:** shorter, with how APM works, what the modules add and a check per step.
 - `scripts/enable-modules.py` registers and enables the modules through the API, with an API token.
