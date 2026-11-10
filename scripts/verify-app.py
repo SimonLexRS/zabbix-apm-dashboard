@@ -28,6 +28,7 @@ NAMESPACE_MACRO = '{$OTLP.NAMESPACE}'
 SPAN_ITEMS = ('otlp.span.status.ok', 'otlp.span.status.error', 'otlp.span.status.unset')
 WINDOW_MIN = 10
 HEARTBEAT = 3600
+MACRO_TIME = re.compile(r'^(\d+(?:\.\d+)?)([smhdw]?)$')
 TOLERANCE = 0.2
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KPI_TEMPLATE_NAME = 'APM business metrics by ClickHouse HTTP'
@@ -74,10 +75,11 @@ def macro_seconds(host_macros: list, name: str, default: int) -> int:
     """{$OTLP.<name>:traces} (or without context) from the host, in seconds; otherwise the template default."""
     values = {m['macro'].replace('"', ''): m.get('value', '') for m in host_macros}  # secret macros have no value
     value = values.get(f'{{$OTLP.{name}:traces}}') or values.get(f'{{$OTLP.{name}}}')
-    if not value:
+    match = MACRO_TIME.match((value or '').strip())
+    if not match:
         return default
-    unit = {'s': 1, 'm': 60, 'h': 3600}.get(value[-1])
-    return int(value[:-1]) * unit if unit else int(value)
+    # Decimals are accepted (1.5m = 90 s); at least one second, as the result is used as a range step.
+    return max(1, round(float(match[1]) * {'': 1, 's': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}[match[2]]))
 
 
 def close(a: float, b: float) -> bool:
@@ -159,10 +161,21 @@ def main() -> int:
     user, password = os.environ.get('ZABBIX_USER'), os.environ.get('ZABBIX_PASSWORD')
     if not url or not (token or (user and password)):
         parser.error('set ZABBIX_URL and ZABBIX_API_TOKEN (or ZABBIX_USER and ZABBIX_PASSWORD)')
-    if not token:
-        token = zabbix(url, '', 'user.login', {'username': user, 'password': password})
+    if token:
+        return checks(args, lambda method, params: zabbix(url, token, method, params))
 
-    api = lambda method, params: zabbix(url, token, method, params)
+    session = zabbix(url, '', 'user.login', {'username': user, 'password': password})
+    try:
+        return checks(args, lambda method, params: zabbix(url, session, method, params))
+    finally:
+        # Only the session opened here is closed; an API token is never invalidated.
+        try:
+            zabbix(url, session, 'user.logout', [])
+        except (Exception, SystemExit) as error:
+            print(f'---- could not close the Zabbix session: {error}', file=sys.stderr)
+
+
+def checks(args: argparse.Namespace, api) -> int:
     host_name = 'apm-' + re.sub(r'[^0-9A-Za-z._ -]', '-', args.namespace)
     hosts = api('host.get', {'output': ['hostid', 'status'], 'filter': {'host': host_name},
         'selectParentTemplates': ['host'], 'selectMacros': ['macro', 'value']})
@@ -184,14 +197,16 @@ def main() -> int:
     report(not unsupported, f'{len(items)} items, unsupported: {unsupported or "none"}')
 
     now = int(time.time())
-    # The template discards unchanged values (heartbeat 1 h): a steady application only stores the changes.
-    ages = [now - int(items[k]['lastclock']) for k in SPAN_ITEMS if k in items and items[k]['lastclock'] != '0']
-    report(bool(ages) and min(ages) < HEARTBEAT + 300,
-        f'span items receive values (newest {min(ages) if ages else "never"} s ago, heartbeat {HEARTBEAT} s)')
-
     # Each value covers the GRANULARITY seconds that end TIMESHIFT seconds before it was collected.
     granularity, shift, frequency = (macro_seconds(host['macros'], name, default)
         for name, default in (('GRANULARITY', 60), ('TIMESHIFT', 10), ('FREQUENCY', 60)))
+    # The span counts store every value (0 without spans), one per FREQUENCY: a few missed collections are tolerated.
+    # A template imported before that discarded unchanged values (heartbeat 1 h): import it again ("add").
+    limit = 3 * frequency + 120
+    ages = [now - int(items[k]['lastclock']) for k in SPAN_ITEMS if k in items and items[k]['lastclock'] != '0']
+    report(bool(ages) and min(ages) < limit,
+        f'span items receive values (newest {min(ages) if ages else "never"} s ago, expected under {limit} s)')
+
     start, end = now - WINDOW_MIN * 60, now
 
     def history(key: str) -> dict:

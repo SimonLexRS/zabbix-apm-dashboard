@@ -8,6 +8,7 @@ use CCol,
 	CFormGrid,
 	CLabel,
 	CLink,
+	CRow,
 	CSection,
 	CSpan,
 	CTableInfo,
@@ -394,6 +395,7 @@ class OverviewHtml {
 				$to['kind'] === 'service' ? new CLink($to['name'], ServiceMap::getServiceUrl($to['name'])) : $to['name'],
 				match ($to['kind']) {
 					'database' => I18n::t('Database'),
+					'queue' => I18n::t('Queue'),
 					'external' => I18n::t('External service'),
 					default => $from['kind'] === 'users' ? I18n::t('User request') : I18n::t('Service call')
 				},
@@ -407,9 +409,12 @@ class OverviewHtml {
 		return new CDiv([
 			$focus !== '' ? (new CDiv([
 				I18n::t('Highlighted: '),
-				new CTag('strong', true, ltrim($focus, ApmStats::EXACT_PREFIX)),
-				I18n::t(' (page filter) and its connections. The rest of the application is dimmed. '),
-				new CLink(I18n::t('Clear filter'), self::getClearFilterUrl(self::TAB_MAP))
+				new CTag('strong', true, str_starts_with($focus, ApmStats::EXACT_PREFIX)
+					? substr($focus, strlen(ApmStats::EXACT_PREFIX))
+					: $focus
+				),
+				I18n::t(' and its connections. The rest of the application is dimmed. '),
+				new CLink(I18n::t('Clear filter'), self::getClearFilterUrl(self::TAB_MAP, $ctx['transient'] ?? false))
 			]))->addClass('apm-overview-hint') : null,
 			$graph['nodes'] ? self::mapSummary(ServiceMap::summary($graph)) : null,
 			ServiceMap::render($graph, $ctx),
@@ -417,6 +422,13 @@ class OverviewHtml {
 				I18n::t('Calls between services and to their dependencies are calculated over the last %d h of the period.'),
 				ApmStats::JOIN_WINDOW / SEC_PER_HOUR
 			)) : null,
+			array_intersect(['services', 'calls'], $data['truncated'] ?? []) ? self::hint(
+				I18n::t('This application has more services or connections than the map reads: the least used ones are missing.')
+			) : null,
+			self::hint(sprintf(
+				I18n::t('Colors show the last %d min; the figures on the map are those of the whole period. Background work (consumers, timers) is not counted as user traffic.'),
+				$ctx['recent_min'] ?? 15
+			)),
 			(new CSection($table))->setHeader(new CTag('h4', true, I18n::t('Connections')))
 		]);
 	}
@@ -549,14 +561,42 @@ class OverviewHtml {
 	}
 
 	/**
-	 * Failed requests grouped by service, endpoint and message.
+	 * Failures grouped into issues, each with its state: active ones first, resolved ones dimmed.
 	 */
 	public static function errors(array $data, array $ctx): CDiv {
+		return new CDiv(self::errorTable($data['errors'], $ctx, $data['truncated'] ?? []));
+	}
+
+	/**
+	 * Table of error groups (ApmStats::getErrorGroups()), shared by the APM overview and the RUM page.
+	 *
+	 * @param array $ctx  ['resolved' => bool, 'time_till' => int, 'recent_min' => int], optional 'browser' => true for
+	 *                    the errors of the browser (page instead of service).
+	 */
+	public static function errorTable(array $errors, array $ctx, array $truncated = []): array {
+		$now = min($ctx['time_till'] ?? time(), time());
+		$browser = $ctx['browser'] ?? false;
+		$counts = array_count_values(array_column($errors, 'state')) + [
+			ApmStats::STATE_NEW => 0, ApmStats::STATE_REGRESSED => 0, ApmStats::STATE_ACTIVE => 0,
+			ApmStats::STATE_RESOLVED => 0
+		];
+		$hidden = 0;
+
 		$table = (new CTableInfo())
-			->setHeader([I18n::t('Service'), 'Endpoint', I18n::t('Message'), 'HTTP', I18n::t('Count'), I18n::t('First seen'), I18n::t('Last seen'), I18n::t('Latest trace')])
+			->setHeader([I18n::t('State'), $browser ? I18n::t('Page') : I18n::t('Service'),
+				$browser ? I18n::t('Where') : 'Endpoint', I18n::t('Error'), 'HTTP', I18n::t('Count'), I18n::t('Trend'),
+				I18n::t('Sessions'), I18n::t('Last seen'), I18n::t('Latest trace')
+			])
 			->setNoDataMessage(I18n::t('No errors in the selected period.'));
 
-		foreach ($data['errors'] as $error) {
+		foreach ($errors as $error) {
+			$resolved = $error['state'] === ApmStats::STATE_RESOLVED;
+
+			if ($resolved && !($ctx['resolved'] ?? true)) {
+				$hidden++;
+				continue;
+			}
+
 			$codes = [];
 
 			foreach ($error['codes'] as $code) {
@@ -568,20 +608,62 @@ class OverviewHtml {
 				? (new CSpan(self::truncate($error['message'], self::MESSAGE_SHORT_LENGTH)))->setTitle($error['message'])
 				: (new CSpan(I18n::t('(no message)')))->addClass(ZBX_STYLE_GREY);
 
-			$table->addRow([
-				(new CCol(new CLink($error['service'], self::getEndpointsUrl($error['service']))))
-					->addClass(ZBX_STYLE_WORDBREAK),
-				(new CCol(self::endpointLabel($error['endpoint'], $error['codes'])))->addClass(ZBX_STYLE_WORDBREAK),
-				(new CCol($message))->addClass('apm-overview-message'),
-				(new CCol($codes ?: '—'))->addClass(ZBX_STYLE_NOWRAP),
-				(new CSpan(self::formatCount($error['count'])))->addClass('apm-overview-count'),
-				(new CCol(self::formatTime($error['first'])))->addClass(ZBX_STYLE_NOWRAP),
-				(new CCol(self::formatTime($error['last'])))->addClass(ZBX_STYLE_NOWRAP),
-				(new CCol(self::traceLink($error['traceid'], $error['last'])))->addClass(ZBX_STYLE_NOWRAP)
-			]);
+			$first = $browser && $error['page'] !== ''
+				? new CLink($error['page'], RumHtml::pageUrl($error['page']))
+				: [
+					new CLink($error['service'], self::getEndpointsUrl($error['service'])),
+					$error['browser'] ? [' ', (new CSpan(I18n::t('browser')))->addClass('apm-pill apm-pill-info')] : null
+				];
+
+			$table->addRow(
+				(new CRow([
+					(new CCol(self::statePill($error['state'])))->addClass(ZBX_STYLE_NOWRAP),
+					(new CCol($first))->addClass(ZBX_STYLE_WORDBREAK),
+					(new CCol(self::endpointLabel($error['endpoint'], $error['codes'])))->addClass(ZBX_STYLE_WORDBREAK),
+					(new CCol([
+						$error['type'] !== '' ? [new CTag('strong', true, $error['type']), ' '] : null,
+						$message
+					]))->addClass('apm-overview-message'),
+					(new CCol($codes ?: '—'))->addClass(ZBX_STYLE_NOWRAP),
+					(new CSpan(self::formatCount($error['count'])))->addClass('apm-overview-count'),
+					self::sparkline($error['series'], 'apm-spark-errors',
+						sprintf(I18n::t('Occurrences over the period (max %s)'), max($error['series']))
+					),
+					$error['sessions'] > 0
+						? (new CSpan(self::formatCount($error['sessions'])))
+							->setTitle(I18n::t('Browser sessions whose requests ended in this error'))
+						: (new CSpan('—'))->addClass(ZBX_STYLE_GREY),
+					(new CCol([
+						self::ago($error['last'], $now),
+						(new CSpan(' · '.self::formatTime($error['last'])))->addClass(ZBX_STYLE_GREY)
+					]))->addClass(ZBX_STYLE_NOWRAP),
+					(new CCol(self::traceLink($error['traceid'], $error['last'])))->addClass(ZBX_STYLE_NOWRAP)
+				]))->addClass($resolved ? 'apm-error-resolved' : null)
+			);
 		}
 
-		return new CDiv($table);
+		$summary = (new CDiv([
+			(new CSpan(sprintf(I18n::t('%d new'), $counts[ApmStats::STATE_NEW])))->addClass('apm-pill apm-pill-bad'), ' ',
+			(new CSpan(sprintf(I18n::t('%d came back'), $counts[ApmStats::STATE_REGRESSED])))
+				->addClass('apm-pill apm-pill-bad'), ' ',
+			(new CSpan(sprintf(I18n::t('%d active'), $counts[ApmStats::STATE_ACTIVE])))->addClass('apm-pill apm-pill-warn'),
+			' ',
+			(new CSpan(sprintf(I18n::t('%d resolved'), $counts[ApmStats::STATE_RESOLVED])))
+				->addClass('apm-pill apm-pill-good'),
+			(new CSpan(sprintf(I18n::t(' · active = seen in the last %d min'), $ctx['recent_min'] ?? 15)))
+				->addClass(ZBX_STYLE_GREY)
+		]))->addClass('apm-error-summary');
+
+		return [
+			$errors ? $summary : null,
+			$table,
+			$hidden > 0 ? self::hint(sprintf(
+				I18n::t('%d resolved errors are hidden (filter: Show resolved errors).'), $hidden
+			)) : null,
+			in_array('errors', $truncated, true) ? self::hint(
+				I18n::t('There are more error groups than shown: the active and most recent ones come first.')
+			) : null
+		];
 	}
 
 	/**
@@ -1173,12 +1255,13 @@ class OverviewHtml {
 	/**
 	 * The page without the service filter, on the given tab.
 	 */
-	public static function getClearFilterUrl(string $tab): CUrl {
-		return (new CUrl('zabbix.php'))
+	public static function getClearFilterUrl(string $tab, bool $transient = false): CUrl {
+		$url = (new CUrl('zabbix.php'))
 			->setArgument('action', 'apm.overview')
-			->setArgument('tab', $tab)
-			->setArgument('filter_set', 1)
-			->setArgument('filter_service', '');
+			->setArgument('tab', $tab);
+
+		// A service picked on the map lives in the URL: leaving it out is enough. The stored filter is emptied.
+		return $transient ? $url : $url->setArgument('filter_set', 1)->setArgument('filter_service', '');
 	}
 
 	public static function getEndpointsUrl(string $service = ''): CUrl {
@@ -1265,10 +1348,13 @@ class OverviewHtml {
 	}
 
 	/**
-	 * Waterfall of one trace: spans in tree order, bars placed on the trace's time line.
+	 * Spans in tree order, each with a bar placed on the time line of the trace (or of the request they belong to).
+	 * Rows of failed spans carry apm-wf-row-error, so that a view can show only those.
+	 *
+	 * @param array $spans  ApmStats::getTraceSpans(), start relative to the start of the time line.
+	 * @param float $total  Length of the time line, nanoseconds.
 	 */
-	private static function waterfall(array $trace, bool $open): CTag {
-		$spans = $trace['spans'];
+	public static function spanRows(array $spans, float $total): CDiv {
 		$ids = array_flip(array_column($spans, 'id'));
 		$children = [];
 
@@ -1290,15 +1376,20 @@ class OverviewHtml {
 			}
 		}
 
-		$total = max(1, $trace['duration']);
+		$total = max(1, $total);
 		$services = array_values(array_unique(array_column($spans, 'service')));
 		$rows = (new CDiv())->addClass('apm-wf');
 
 		foreach (array_slice($ordered, 0, count($spans)) as [$i, $depth]) {
 			$span = $spans[$i];
-			$category = $span['db_system'] !== ''
-				? 'db'
-				: (($span['kind'] === 'Client' || $span['kind'] === 'Producer') ? 'calls' : 'svc'.(array_search($span['service'], $services) % 6));
+			$browser = $span['browser'] ?? false;
+			$category = $browser
+				? 'browser'
+				: ($span['db_system'] !== ''
+					? 'db'
+					: (($span['kind'] === 'Client' || $span['kind'] === 'Producer')
+						? 'calls'
+						: 'svc'.(array_search($span['service'], $services) % 6)));
 
 			$left = min(100, $span['start'] / $total * 100);
 			$width = max(0.3, min(100 - $left, $span['duration'] / $total * 100));
@@ -1307,12 +1398,13 @@ class OverviewHtml {
 				(new CDiv([
 					(new CDiv([
 						(new CSpan($span['service']))->addClass('apm-wf-service'),
+						$browser ? [' ', (new CSpan(I18n::t('browser')))->addClass('apm-pill apm-pill-info')] : null,
 						' ',
 						(new CSpan($span['name']))->addClass($span['error'] ? ZBX_STYLE_COLOR_NEGATIVE : null)
 					]))
 						->addClass('apm-wf-name')
 						->addStyle('padding-left: '.min(12, $depth) * 12 .'px;')
-						->setTitle($span['service'].' · '.$span['name']),
+						->setTitle($span['service'].' · '.$span['name'].' · '.$span['kind']),
 					(new CDiv(
 						(new CDiv())
 							->addClass('apm-wf-span')
@@ -1321,9 +1413,21 @@ class OverviewHtml {
 							->addStyle(sprintf('left: %.2f%%; width: %.2f%%;', $left, $width))
 					))->addClass('apm-wf-track'),
 					(new CDiv(ApmStats::formatDuration($span['duration'])))->addClass('apm-wf-duration')
-				]))->addClass('apm-wf-row')
+				]))
+					->addClass('apm-wf-row')
+					->addClass($span['error'] ? 'apm-wf-row-error' : null)
 			);
 		}
+
+		return $rows;
+	}
+
+	/**
+	 * Waterfall of one trace: spans in tree order, bars placed on the trace's time line.
+	 */
+	private static function waterfall(array $trace, bool $open): CTag {
+		$spans = $trace['spans'];
+		$rows = self::spanRows($spans, (float) $trace['duration']);
 
 		$summary = new CTag('summary', true, [
 			(new CSpan(ApmStats::formatDuration($trace['duration'])))->addClass('apm-wf-total'),
@@ -1488,10 +1592,50 @@ class OverviewHtml {
 		return $pill;
 	}
 
+	/**
+	 * Link to a trace: opens the trace panel of the module (apm.trace.panel, see CApmTracePanel); without JavaScript,
+	 * or with a modified click, the native trace list filtered by that trace.
+	 */
 	public static function traceLink(string $traceid, int $clock, ?string $label = null): CLink {
 		return (new CLink($label ?? substr($traceid, 0, 8).'…', self::getTraceUrl($traceid, $clock)))
 			->addClass($label === null ? 'apm-overview-traceid' : null)
-			->setTitle(sprintf(I18n::t('Trace ID %s · open in the trace viewer'), $traceid));
+			->setAttribute('data-apm-trace', $traceid)
+			->setAttribute('data-clock', (string) $clock)
+			->setTitle(sprintf(I18n::t('Trace ID %s · open the trace'), $traceid));
+	}
+
+	/**
+	 * State of an error group as a pill.
+	 */
+	public static function statePill(string $state): CSpan {
+		[$label, $class, $title] = match ($state) {
+			ApmStats::STATE_NEW => [I18n::t('New'), 'apm-pill-bad',
+				I18n::t('First seen in the recent window: it had not happened before in the time read.')
+			],
+			ApmStats::STATE_REGRESSED => [I18n::t('Came back'), 'apm-pill-bad',
+				I18n::t('It had stopped happening and is happening again.')
+			],
+			ApmStats::STATE_RESOLVED => [I18n::t('Resolved'), 'apm-pill-good',
+				I18n::t('It has not happened in the recent window.')
+			],
+			default => [I18n::t('Active'), 'apm-pill-warn', I18n::t('It keeps happening.')]
+		};
+
+		return (new CSpan($label))->addClass('apm-pill')->addClass($class)->setTitle($title);
+	}
+
+	/**
+	 * "5 min ago", "2 h ago": how long since a moment, against the end of the period.
+	 */
+	public static function ago(int $clock, int $now): string {
+		$seconds = max(0, $now - $clock);
+
+		return match (true) {
+			$seconds < SEC_PER_MIN => I18n::t('just now'),
+			$seconds < SEC_PER_HOUR => sprintf(I18n::t('%d min ago'), intdiv($seconds, SEC_PER_MIN)),
+			$seconds < SEC_PER_DAY => sprintf(I18n::t('%d h ago'), intdiv($seconds, SEC_PER_HOUR)),
+			default => sprintf(I18n::t('%d d ago'), intdiv($seconds, SEC_PER_DAY))
+		};
 	}
 
 	/**

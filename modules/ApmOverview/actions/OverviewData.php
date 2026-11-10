@@ -27,6 +27,7 @@ class OverviewData extends CController {
 		$ret = $this->validateInput([
 			'tab' => 'required|in '.implode(',', OverviewHtml::DATA_TABS),
 			'endpoint_service' => 'string',
+			'service' => 'string',
 			'from' => 'range_time',
 			'to' => 'range_time'
 		]) && $this->validateTimeSelectorPeriod();
@@ -48,7 +49,7 @@ class OverviewData extends CController {
 
 	protected function doAction(): void {
 		$tab = $this->getInput('tab');
-		$filter = Overview::getFilter($this->getInput('endpoint_service', ''));
+		$filter = Overview::getFilter($this->getInput('endpoint_service', ''), $this->getInput('service', ''));
 
 		// Read-only: the time selector profile is not updated, relative periods ("now-1h") move forward on every call.
 		$timeselector = getTimeSelectorPeriod([
@@ -66,6 +67,11 @@ class OverviewData extends CController {
 			'endpoint_service' => $filter['endpoint_service'],
 			'apdex_ms' => $filter['apdex_ms'],
 			'focus' => $filter['service'],
+			'transient' => $filter['focus'] !== '',
+			'recent_min' => $filter['recent_min'],
+			'long_s' => $filter['long_s'],
+			'resolved' => $filter['resolved'],
+			'time_till' => $timeselector['to_ts'],
 			'join_capped' => $timeselector['to_ts'] - $timeselector['from_ts'] > ApmStats::JOIN_WINDOW
 		]);
 

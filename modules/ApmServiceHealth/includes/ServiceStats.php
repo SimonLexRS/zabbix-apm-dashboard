@@ -20,8 +20,28 @@ class ServiceStats {
 	 */
 	public const SERIES_MINUTES = 30;
 
+	// A request received by a service: the first span of a trace, or a span that answers a call or consumes a message
+	// (the same definition as the APM overview page).
+	private const ENTRY = '(ParentSpanId=\'\' OR SpanKind IN (\'Server\',\'Consumer\'))';
+
+	// Spans of 5 minutes or more are connections kept open (streams, long polls): counted, left out of the latency.
+	private const LATENCY = 'Duration<300000000000';
+
 	/**
-	 * Statistics are calculated from root spans, the same way as the native trace list defines a trace.
+	 * "=name" exactly, "*" as wildcard, otherwise names containing the text (as the filter of the APM overview page).
+	 */
+	public static function likePattern(string $service): string {
+		if (str_starts_with($service, '=')) {
+			return addcslashes(substr($service, 1), '\\%_');
+		}
+
+		$pattern = addcslashes($service, '\\%_');
+
+		return str_contains($pattern, '*') ? str_replace('*', '%', $pattern) : '%'.$pattern.'%';
+	}
+
+	/**
+	 * Statistics are calculated from the requests each service receives, whoever sends them.
 	 *
 	 * @param string $service      Service name pattern, "*" is a wildcard. Empty string matches all services.
 	 * @param string $application  service.namespace of the services. Empty string matches all applications.
@@ -39,11 +59,11 @@ class ServiceStats {
 			->select('ServiceName', 'service')
 			->select('count()', 'requests')
 			->select('countIf(StatusCode=\'Error\')', 'errors')
-			->select('quantiles(0.5,0.95,0.99)(Duration)', 'q')
+			->select('quantilesIf(0.5,0.95,0.99)(Duration,'.self::LATENCY.')', 'q')
 			->from('otel_traces')
 			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
 			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]])
-			->where('ParentSpanId=\'\'')
+			->where(self::ENTRY)
 			->group('ServiceName');
 
 		if ($application !== '') {
@@ -53,8 +73,7 @@ class ServiceStats {
 		self::whereAccess($query);
 
 		if ($service !== '') {
-			$pattern = addcslashes($service, '\\%_');
-			$pattern = str_contains($pattern, '*') ? str_replace('*', '%', $pattern) : '%'.$pattern.'%';
+			$pattern = self::likePattern($service);
 
 			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', $pattern]]);
 		}
@@ -81,9 +100,9 @@ class ServiceStats {
 				'errors' => $errors,
 				'error_rate' => $requests > 0 ? $errors / $requests * 100 : 0,
 				'rpm' => $requests / $minutes,
-				'p50' => (float) $row['q'][0],
-				'p95' => (float) $row['q'][1],
-				'p99' => (float) $row['q'][2]
+				'p50' => (float) ($row['q'][0] ?? 0),
+				'p95' => (float) ($row['q'][1] ?? 0),
+				'p99' => (float) ($row['q'][2] ?? 0)
 			];
 		}
 
@@ -120,7 +139,7 @@ class ServiceStats {
 			->from('otel_traces')
 			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $series_from]])
 			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $series_till]])
-			->where('ParentSpanId=\'\'')
+			->where(self::ENTRY)
 			->where('has({services:Array(String)},ServiceName)', ['services' => ['String', array_values($services)]])
 			->group('ServiceName')
 			->group('bucket');

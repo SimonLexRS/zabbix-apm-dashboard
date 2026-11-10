@@ -105,6 +105,28 @@ The tracing code is the same in the three: page loads, user actions and fetch re
 The lab has a page instrumented exactly this way ([lab.md](lab.md)), and the
 [OpenTelemetry Demo](../examples/stacks/opentelemetry-demo/README.md) frontend fills every tab.
 
+## Errors: from the browser to the backend and back
+
+| You are looking at | You get to | How |
+|---|---|---|
+| An error of the page, or a request that fails (**Errors** tab) | The trace, down to the backend service that failed, and its logs | The trace link opens the **trace panel** |
+| A request in a session timeline | The same panel, and how much of the wait was backend and how much network | The trace link of the request |
+| A backend error or a slow trace (**APM → Overview**) | The session, the user and the page it came from | *Where it came from*, in the trace panel |
+| A page load in a session timeline | Everything that page loaded and asked for, as a waterfall | *What this page loaded* |
+
+Errors are grouped (page, kind of exception, message without its numbers and ids) and each group has a state, worked out from when it happened:
+
+| State | Meaning |
+|---|---|
+| **New** | It appeared within the last minutes and had not happened before |
+| **Active** | It keeps happening |
+| **Came back** | It had stopped and is happening again |
+| **Resolved** | It has not happened in the last minutes (15 by default: filter *"Now" window* of APM → Overview) |
+
+Nothing is closed by hand: fix the cause and the group becomes *Resolved* by itself.
+
+Errors of the page itself need the error capture of the guide (**How it works**): `error` and `unhandledrejection` become failed spans. Failed requests need nothing.
+
 ## How to test
 
 ```mermaid
@@ -161,6 +183,14 @@ INFO Web Vitals: none. They need examples/web-vitals.js, or test the path with -
 
 ✅ The request must appear as failed, with the service that failed and the link to the trace.
 
+To see it without breaking anything, send a synthetic session that fails (a page error, and a request that fails in a backend service, with its log):
+
+```sh
+python3 scripts/test-rum.py opentelemetry-demo --send-error http://127.0.0.1:4318
+```
+
+✅ **Errors** shows a `TypeError` as *New*; its trace link opens the panel. In **APM → Overview → Errors**, `PaymentError` shows 1 session; its panel names the session and the page `/checkout`. Stop sending and both become *Resolved* after the "now" window; send again and they are *Came back*.
+
 ### Level 4. Test Web Vitals
 
 **The demo doesn't send Web Vitals**, so that section stays empty even when everything works. There are two ways to test it:
@@ -212,6 +242,7 @@ Open **APM → Real user monitoring** and choose your application at the top. Th
   actions and requests.
 - Without `traceparent` propagation, requests show no backend trace.
 - Session replay, browser profiling and geography are not part of OpenTelemetry data.
+- If the backend samples its traces, the requests it drops show no backend part.
 - `enduser.id` should be a pseudonymous id, never an e-mail or a name.
 
 ## Core Web Vitals

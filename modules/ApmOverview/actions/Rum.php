@@ -33,9 +33,14 @@ class Rum extends CController {
 			'filter_app' => 'string',
 			'filter_page' => 'string',
 			'filter_user' => 'string',
+			'filter_session' => 'string',
 			'filter_failed' => 'in 0,1',
 			'filter_set' => 'in 1',
 			'filter_rst' => 'in 1',
+			'session' => 'string',
+			'session_from' => 'int32',
+			'session_to' => 'int32',
+			'trace' => 'string',
 			'tab' => 'in '.implode(',', RumLoader::TABS),
 			'from' => 'range_time',
 			'to' => 'range_time'
@@ -59,7 +64,7 @@ class Rum extends CController {
 				CProfile::delete(self::PROFILE_IDX.'.filter_page');
 			}
 
-			foreach (['filter_page', 'filter_user'] as $field) {
+			foreach (['filter_page', 'filter_user', 'filter_session'] as $field) {
 				if ($this->hasInput($field)) {
 					CProfile::update(self::PROFILE_IDX.'.'.$field, trim($this->getInput($field)), PROFILE_TYPE_STR);
 				}
@@ -73,7 +78,7 @@ class Rum extends CController {
 			}
 		}
 		elseif ($this->hasInput('filter_rst')) {
-			foreach (['filter_page', 'filter_user', 'filter_failed'] as $field) {
+			foreach (['filter_page', 'filter_user', 'filter_session', 'filter_failed'] as $field) {
 				CProfile::delete(self::PROFILE_IDX.'.'.$field);
 			}
 		}
@@ -130,7 +135,17 @@ class Rum extends CController {
 				->getUrl(),
 			'session_url' => (new CUrl('zabbix.php'))
 				->setArgument('action', 'apm.rum.session')
-				->getUrl()
+				->getUrl(),
+			// A link from a trace: open the timeline of that session, at the request of that trace.
+			'open_session' => $this->hasInput('session') && $this->hasInput('session_from') && $this->hasInput('session_to')
+				? [
+					'session' => $this->getInput('session'),
+					'from' => (int) $this->getInput('session_from'),
+					'to' => (int) $this->getInput('session_to'),
+					'trace' => $this->getInput('trace', '')
+				]
+				: null,
+			'live' => str_starts_with((string) $timeselector['to'], 'now')
 		]);
 		$response->setTitle(I18n::t('Real user monitoring'));
 		$this->setResponse($response);
@@ -144,6 +159,7 @@ class Rum extends CController {
 			'application' => CProfile::get(self::PROFILE_IDX.'.filter_app'),
 			'page' => CProfile::get(self::PROFILE_IDX.'.filter_page', ''),
 			'user' => CProfile::get(self::PROFILE_IDX.'.filter_user', ''),
+			'session' => CProfile::get(self::PROFILE_IDX.'.filter_session', ''),
 			'failed' => (bool) CProfile::get(self::PROFILE_IDX.'.filter_failed', 0)
 		];
 	}

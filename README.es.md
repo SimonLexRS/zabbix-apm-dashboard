@@ -43,7 +43,8 @@ sudo ./scripts/setup.sh demo <IP>        # opcional: tienda de prueba de unos 20
 | ¿Qué servicio o endpoint va mal? | **Métricas RED:** tasa, errores y duración, con tendencia | APM → Overview |
 | ¿Qué error se repite? | **Errores agrupados**, con veces, última aparición y traza | APM → Overview |
 | ¿Dónde se pierde el tiempo? | **Origen de la lentitud:** código, base de datos u otros servicios, con cascadas y consultas costosas | APM → Overview |
-| ¿Qué viven mis usuarios? | **RUM:** sesiones hasta el backend, cargas de página, recursos y Core Web Vitals | APM → Real user monitoring |
+| ¿Qué viven mis usuarios? | **RUM:** sesiones hasta el backend, cargas de página, recursos, errores de la página y Core Web Vitals | APM → Real user monitoring |
+| ¿A qué usuario le tocó este error del backend? | **Panel de traza:** sesión, usuario y página de cualquier traza, y de vuelta | Cualquier enlace de traza |
 | ¿Cuántos pedidos tuvo hoy cada tienda y cuántas habitaciones quedan libres? | **KPIs de negocio:** los contadores y niveles de tu aplicación (pedidos, reservas, disponibilidad) por atributo, con totales completos, participación y ranking, un dashboard de comparación e ítems que el asistente puede leer | APM → Overview, host `apm-<aplicación>` |
 | ¿Puedo verlo junto a mi monitoreo? | **Widgets** APM service map y APM service health | Dashboards |
 | ¿Me avisa si algo va mal? | **Plantilla** con items, triggers y dashboard por aplicación | Host `apm-<aplicación>` |
@@ -115,7 +116,8 @@ Más: [experiencia del usuario](docs/screenshots/user-experience.png) y [origen 
 - **Estado**: ¿llega la telemetría? Fuente de datos, conexión y registros por señal.
 - **Mapa de servicios**: el estado del sistema ahora (tráfico de entrada, tasa de error, servicio más lento, qué requiere atención) y el flujo en vivo de los usuarios a los servicios, bases de datos y servicios externos. Las flechas se colorean por salud, son tan gruesas como su tráfico y tienen partículas en movimiento; pasa el ratón por un servicio para seguir su camino y ver sus cifras, y haz clic para ver dónde se va su tiempo.
 - **Servicios / Endpoints**: métricas RED (tasa, errores, duración) con tendencias por minuto.
-- **Errores**: fallos agrupados por servicio, endpoint y mensaje, con veces, primera y última vez y la última traza.
+- **Errores**: fallos agrupados en incidencias (servicio, operación, excepción, mensaje), cada una con su estado: nuevo, activo, reapareció o resuelto. Un error corregido pasa a resuelto solo.
+- **Panel de traza** (cualquier enlace de traza): los spans del navegador a las bases de datos, los logs de la traza, y la sesión, el usuario y la página de donde vino.
 - **KPIs de negocio**: los contadores, indicadores e histogramas que envía la aplicación (pedidos, reservas, ingresos), con su total del periodo, tendencia y desglose por atributo ([docs/business-kpis.es.md](docs/business-kpis.es.md)).
 - **Experiencia del usuario**: Core Web Vitals ([docs/rum.es.md](docs/rum.es.md)), Apdex por servicio y endpoint, e histogramas de latencia.
 - **Origen de la lentitud**: tiempo por endpoint (código propio / base de datos / otros servicios), las peticiones más lentas con su cascada de spans, las consultas más costosas y los endpoints más lentos que en el periodo anterior.

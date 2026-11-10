@@ -121,9 +121,12 @@ class Rum {
 	 * Timeline of a session: page loads, user actions and requests in time order. A request made by an action (same
 	 * trace) is placed under it; the others stand on their own.
 	 *
-	 * @param array $spans  Rows with 'type' (view, action, request), 'trace', 'start' (ns) and any other fields.
+	 * @param array $spans  Rows with 'type' (view, action, request, resource, error), 'trace', 'start' (ns) and any
+	 *                      other fields.
 	 *
-	 * @return array  The rows, with 'offset_ms' from the first one and 'requests' under each action.
+	 * @return array  The rows, with 'offset_ms' from the first one, 'requests' under each action and, in each page
+	 *                load, 'loaded': the resources and requests that followed it until the next page load (start
+	 *                relative to the page load, ns). Resources are not rows of their own.
 	 */
 	public static function timeline(array $spans): array {
 		// In time order; at the same instant, the page load, then the action, then the request it made.
@@ -139,11 +142,33 @@ class Rum {
 		$first = $spans[0]['start'];
 		$actions = [];
 		$items = [];
+		$view = null;
 
 		foreach ($spans as $span) {
 			$span['offset_ms'] = ($span['start'] - $first) / 1e6;
 
-			if ($span['type'] === 'action') {
+			// Everything a page loaded and asked for, to draw the waterfall of that view.
+			if ($view !== null && ($span['type'] === 'resource' || $span['type'] === 'request')) {
+				$items[$view]['loaded'][] = [
+					'type' => $span['type'],
+					'label' => $span['url'] ?? '',
+					'kind' => $span['kind'] ?? '',
+					'start' => $span['start'] - $items[$view]['start'],
+					'duration' => $span['duration'] ?? 0,
+					'failed' => $span['failed'] ?? false
+				];
+			}
+
+			if ($span['type'] === 'resource') {
+				continue;
+			}
+
+			if ($span['type'] === 'view') {
+				$span['loaded'] = [];
+				$items[] = $span;
+				$view = array_key_last($items);
+			}
+			elseif ($span['type'] === 'action') {
 				$span['requests'] = [];
 				$items[] = $span;
 				$actions[$span['trace']] = array_key_last($items);

@@ -386,6 +386,7 @@ html[color-scheme="dark"] .apm-map-node.apm-map-bad .apm-map-card {
 }
 
 .apm-map-kind-database .apm-map-card,
+.apm-map-kind-queue .apm-map-card,
 .apm-map-kind-external .apm-map-card {
 	stroke-dasharray: 5 3;
 }
@@ -1281,4 +1282,148 @@ html[color-scheme="dark"] .apm-rum-panel {
 
 .apm-kpi-table td {
 	overflow-wrap: anywhere;
+}
+
+/* A block whose last refresh failed: still readable, visibly old. */
+.apm-overview-stale {
+	opacity: 0.55;
+}
+
+/* Informational pill (browser, log severity). */
+.apm-pill-info {
+	background-color: rgba(64, 132, 238, 0.2);
+}
+
+/* Errors with a state. */
+.apm-error-summary {
+	margin: 4px 0 8px;
+}
+
+.apm-error-resolved td {
+	opacity: 0.55;
+}
+
+.apm-error-resolved td:first-child {
+	opacity: 1;
+}
+
+/* Trace panel: opens over the page and over the session panel. */
+.apm-trace-panel {
+	z-index: 1010;
+	width: min(980px, 96vw);
+}
+
+.apm-trace-head {
+	margin-bottom: 12px;
+	line-height: 1.7;
+}
+
+.apm-trace-title {
+	font-size: 14px;
+	overflow-wrap: anywhere;
+}
+
+.apm-trace-section {
+	margin: 0 0 16px;
+}
+
+.apm-trace-section > h5 {
+	margin: 0 0 6px;
+	padding-bottom: 3px;
+	border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+	font-size: 12px;
+	font-weight: bold;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.apm-trace-origin {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 4px 12px;
+	margin: 0 0 8px;
+}
+
+.apm-trace-origin dt {
+	color: #768d99;
+}
+
+.apm-trace-origin dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.apm-trace-split .apm-slow-bar {
+	margin-top: 4px;
+	max-width: 520px;
+}
+
+.apm-trace-services {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.apm-trace-service {
+	padding: 3px 8px;
+	border: 1px solid rgba(128, 128, 128, 0.4);
+	border-radius: 6px;
+	color: inherit;
+	text-decoration: none;
+}
+
+.apm-trace-service:hover {
+	border-color: currentColor;
+	text-decoration: none;
+}
+
+.apm-trace-service-bad {
+	border-color: rgba(228, 89, 89, 0.8);
+}
+
+.apm-trace-host {
+	margin-top: 8px;
+}
+
+.apm-trace-only-errors {
+	margin: 0 4px 6px 0;
+	vertical-align: middle;
+}
+
+.apm-trace-only-errors:checked ~ .apm-wf .apm-wf-row:not(.apm-wf-row-error) {
+	display: none;
+}
+
+.apm-trace-log {
+	font-family: monospace;
+	font-size: 12px;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+.apm-wf-span.apm-wf-browser {
+	background-color: #4084ee;
+}
+
+/* The request a trace link pointed at, in the session timeline. */
+.apm-rum-highlight {
+	outline: 2px solid #4084ee;
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+
+/* Session timeline: backend and network share of a request, and the waterfall of a view. */
+.apm-rum-split {
+	margin-left: 6px;
+	color: #768d99;
+}
+
+.apm-rum-view-wf {
+	margin: 4px 0 6px;
+}
+
+.apm-rum-view-wf > summary {
+	cursor: pointer;
+	color: #768d99;
 }

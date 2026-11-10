@@ -17,6 +17,8 @@ namespace {
 	require $root.'/ApmOverview/includes/ApmAccess.php';
 	require $root.'/ApmOverview/includes/ApmStats.php';
 	require $root.'/ApmOverview/includes/Rum.php';
+	require $root.'/ApmOverview/includes/RumStats.php';
+	require $root.'/ApmOverview/includes/TraceStats.php';
 	require $root.'/ApmOverview/includes/ServiceMap.php';
 	require $root.'/ApmOverview/includes/Integration.php';
 	require $root.'/ApmOverview/includes/BusinessMetrics.php';
@@ -149,7 +151,7 @@ namespace Modules\ApmOverview\Includes {
 		}
 
 		check("browser guide $key sets the service and session",
-			str_contains(implode("\n", array_column($method['steps'], 'code')), "span.setAttribute('session.id', sessionId)")
+			str_contains(implode("\n", array_column($method['steps'], 'code')), "'session.id': sessionId")
 				&& str_contains(implode("\n", array_column($method['steps'], 'code')), "'service.namespace': '{namespace}'"),
 			true
 		);
@@ -208,6 +210,90 @@ namespace Modules\ApmOverview\Includes {
 	]);
 	check('health warn', ServiceMap::health(1.0, null, ServiceMap::DEFAULT_THRESHOLDS), 'warn');
 	check('health bad by p95', ServiceMap::health(0.0, 4e9, ServiceMap::DEFAULT_THRESHOLDS), 'bad');
+
+	check('matches: only * is a wildcard', [ServiceMap::matches('a?c', 'a?c'), ServiceMap::matches('abc', 'a?c'),
+		ServiceMap::matches('api[1]', 'api[*')], [true, false, true]);
+
+	// Who is user traffic: only what came from outside. A consumer that starts its own trace gets no users edge, a
+	// queue is not a database, a host that is the name of a known service is that service, and a problem that stopped
+	// (errors in the period, none in the recent window) does not color the map.
+	$recent = static fn(int $requests, int $errors, float $p95 = 1e7): array =>
+		['requests' => $requests, 'errors' => $errors, 'error_rate' => 0, 'p95' => $p95];
+	$graph2 = ServiceMap::build([
+		['service' => 'web', 'requests' => 100, 'errors' => 10, 'rpm' => 10.0, 'p95' => 1e8, 'browser' => false,
+			'user' => ['requests' => 100, 'errors' => 10], 'recent' => $recent(20, 0)],
+		['service' => 'worker', 'requests' => 50, 'errors' => 0, 'rpm' => 5.0, 'p95' => 1e8, 'browser' => false,
+			'user' => ['requests' => 0, 'errors' => 0], 'recent' => $recent(10, 0)],
+		['service' => 'cart', 'requests' => 30, 'errors' => 0, 'rpm' => 3.0, 'p95' => 1e7, 'browser' => false,
+			'user' => ['requests' => 0, 'errors' => 0], 'recent' => $recent(5, 5)]
+	], [
+		['source' => 'web', 'target' => '', 'db_system' => 'kafka', 'host' => 'kafka', 'calls' => 50, 'errors' => 0,
+			'p95' => 1e6, 'recent' => ['calls' => 10, 'errors' => 0, 'p95' => 1e6]],
+		['source' => 'web', 'target' => '', 'db_system' => '', 'host' => 'cart', 'calls' => 30, 'errors' => 0,
+			'p95' => 1e6, 'recent' => ['calls' => 5, 'errors' => 0, 'p95' => 1e6]]
+	], 10);
+	$edges2 = array_map(static fn(array $edge): string => $edge['from'].'>'.$edge['to'], $graph2['edges']);
+	sort($edges2);
+	check('map: users edge only for user traffic, queue node, host named as a service',
+		$edges2, ['svc:web>mq:kafka', 'svc:web>svc:cart', 'users>svc:web']
+	);
+	check('map: queue kind', $graph2['nodes']['mq:kafka']['kind'], 'queue');
+	check('map: a measured service keeps its own figures', $graph2['nodes']['svc:cart']['requests'], 30);
+	check('map: health now, a problem that stopped is healthy',
+		ServiceMap::health(...[...ServiceMap::current($graph2['nodes']['svc:web']), ServiceMap::DEFAULT_THRESHOLDS]), 'ok'
+	);
+	check('map: health now, a problem that is happening',
+		ServiceMap::health(...[...ServiceMap::current($graph2['nodes']['svc:cart']), ServiceMap::DEFAULT_THRESHOLDS]), 'bad'
+	);
+	check('map: without a recent window the period decides',
+		ServiceMap::current(['errors' => 5, 'requests' => 100, 'p95' => 2.0, 'now' => null]), [5.0, 2.0]
+	);
+	$summary2 = ServiceMap::summary($graph2);
+	check('map summary: only user traffic is incoming', $summary2['requests'], 100);
+	check('map summary: attention follows now', array_column($summary2['attention'], 'label'), ['cart']);
+
+	// State of an error group: resolved when it stopped, new when never seen before, back after a gap, else active.
+	check('error state resolved', ApmStats::errorState(0, 0, 1000, 900), ApmStats::STATE_RESOLVED);
+	check('error state new', ApmStats::errorState(3, 5000, 0, 900), ApmStats::STATE_NEW);
+	check('error state came back', ApmStats::errorState(3, 5000, 4000, 900), ApmStats::STATE_REGRESSED);
+	check('error state active', ApmStats::errorState(3, 5000, 4500, 900), ApmStats::STATE_ACTIVE);
+	check('error message without its changing parts', ApmStats::normalizeMessage(
+		'order 4711 of user 7f3c2a10-1b2c-4d5e-8f90-123456789abc failed at 0x1F after 30 ms'
+	), 'order ? of user ? failed at ? after ? ms');
+	check('error message keeps words', ApmStats::normalizeMessage('stream closed due to server-side timeout'),
+		'stream closed due to server-side timeout'
+	);
+
+	// A request and everything below it, whatever the order of the spans.
+	$tree = [
+		['id' => 'a', 'parent' => ''], ['id' => 'c', 'parent' => 'b'], ['id' => 'b', 'parent' => 'a'],
+		['id' => 'd', 'parent' => 'a'], ['id' => 'e', 'parent' => 'c']
+	];
+	check('subtree', array_column(ApmStats::subtree($tree, 'b'), 'id'), ['c', 'b', 'e']);
+	check('subtree of a span that is not there: everything', count(ApmStats::subtree($tree, 'zz')), 5);
+
+	// Trace panel: services in the order they joined, and the browser/backend split of a request.
+	$trace_spans = [
+		['service' => 'web', 'kind' => 'Client', 'duration' => 100.0, 'error' => false, 'browser' => true],
+		['service' => 'api', 'kind' => 'Server', 'duration' => 60.0, 'error' => true, 'browser' => false],
+		['service' => 'api', 'kind' => 'Client', 'duration' => 20.0, 'error' => false, 'browser' => false]
+	];
+	check('trace services', array_map(static fn(array $s): array => [$s['service'], $s['spans'], $s['errors'], $s['browser']],
+		TraceStats::services($trace_spans)
+	), [['web', 1, 0, true], ['api', 2, 1, false]]);
+	check('trace split', TraceStats::split($trace_spans), ['total' => 100.0, 'backend' => 60.0, 'network' => 40.0]);
+	check('trace split without a browser', TraceStats::split(array_slice($trace_spans, 1)), null);
+
+	// A view collects what it loaded; resources are not rows of the timeline.
+	$views = Rum::timeline([
+		['type' => 'view', 'trace' => 'v', 'start' => 0, 'duration' => 500.0],
+		['type' => 'resource', 'trace' => 'v', 'start' => 100, 'duration' => 50.0, 'url' => 'https://x/app.js', 'kind' => 'script'],
+		['type' => 'request', 'trace' => 'r', 'start' => 200, 'duration' => 80.0, 'url' => 'https://x/api', 'failed' => true]
+	]);
+	check('rum view: resources are not rows', array_column($views, 'type'), ['view', 'request']);
+	check('rum view: what it loaded', array_map(static fn(array $l): array => [$l['type'], $l['start'], $l['failed']],
+		$views[0]['loaded']
+	), [['resource', 100, false], ['request', 200, true]]);
 
 	// Map drawing: width by share of the busiest edge, particle speed by calls per minute.
 	check('edge width busiest', ServiceMap::edgeWidth(100, 100), 8.0);

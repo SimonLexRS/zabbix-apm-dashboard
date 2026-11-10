@@ -3,6 +3,10 @@
  * records with the rum.* attributes the module reads (rum.metric, rum.value, rum.rating, rum.page, rum.device,
  * rum.id). Uses the web-vitals library (npm i web-vitals).
  *
+ * NAMESPACE: the application, sent as the service.namespace resource attribute. The page shows one tab per application
+ * and only reads the records of that namespace, so use the same value as the rest of the application (the one in its
+ * OTEL_RESOURCE_ATTRIBUTES); without it the Web Vitals never appear.
+ *
  * ENDPOINT: the collector's OTLP/HTTP logs URL. Best behind your own site (e.g. a reverse proxy path /otlp/v1/logs to
  * http://collector:4318/v1/logs) so the browser posts same-origin; to post to the collector directly, enable CORS in
  * its otlp http receiver (cors: allowed_origins: ["https://your.site"]).
@@ -12,6 +16,7 @@
 import {onCLS, onFCP, onINP, onLCP, onTTFB} from 'web-vitals';
 
 const ENDPOINT = '/otlp/v1/logs';
+const NAMESPACE = 'my-app'; // service.namespace of the application: its tab in Zabbix APM
 const SERVICE = 'my-app-browser'; // shown as a service in Zabbix APM; any name works
 
 // Replace ids in the path with placeholders, e.g. /orders/8f2c… -> /orders/{id}. Adapt to your routes.
@@ -30,7 +35,7 @@ function flush() {
 
 	const body = JSON.stringify({
 		resourceLogs: [{
-			resource: {attributes: [attr('service.name', SERVICE)]},
+			resource: {attributes: [attr('service.namespace', NAMESPACE), attr('service.name', SERVICE)]},
 			scopeLogs: [{
 				scope: {name: 'rum'},
 				logRecords: queue.splice(0).map((m) => ({

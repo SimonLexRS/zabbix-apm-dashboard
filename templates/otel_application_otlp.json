@@ -31,11 +31,10 @@
                         "description": "Number of `Error` severity entries in logs.",
                         "preprocessing": [
                             {
-                                "type": "JSONPATH",
+                                "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "$[?(@.SeverityNumber >= 17 && @.SeverityNumber <= 20)].count.first()"
-                                ],
-                                "error_handler": "DISCARD_VALUE"
+                                    "var rows = JSON.parse(value), newest = null, total = 0, i, clock, severity, count;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result of \"Get logs\": ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tclock = Number(rows[i].clock);\n\tif (!isNaN(clock) && (newest === null || clock > newest)) {\n\t\tnewest = clock;\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\tseverity = Number(rows[i].SeverityNumber);\n\tcount = Number(rows[i].count);\n\tif (severity >= 17 && severity <= 20 && !isNaN(count)\n\t\t\t&& (newest === null || Number(rows[i].clock) === newest)) {\n\t\ttotal += count;\n\t}\n}\nreturn total;"
+                                ]
                             },
                             {
                                 "type": "DISCARD_UNCHANGED_HEARTBEAT",
@@ -65,7 +64,9 @@
                                         "tag": "scope",
                                         "value": "notice"
                                     }
-                                ]
+                                ],
+                                "url": "zabbix.php?action=apm.overview&tab=errors&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                "url_name": "APM overview"
                             }
                         ]
                     },
@@ -113,6 +114,17 @@
                                 "tag": "component",
                                 "value": "raw"
                             }
+                        ],
+                        "preprocessing": [
+                            {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "[]"
+                            }
                         ]
                     },
                     {
@@ -123,11 +135,10 @@
                         "description": "Number of `Fatal` severity entries in logs.",
                         "preprocessing": [
                             {
-                                "type": "JSONPATH",
+                                "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "$[?(@.SeverityNumber >= 21 && @.SeverityNumber <= 24)].count.first()"
-                                ],
-                                "error_handler": "DISCARD_VALUE"
+                                    "var rows = JSON.parse(value), newest = null, total = 0, i, clock, severity, count;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result of \"Get logs\": ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tclock = Number(rows[i].clock);\n\tif (!isNaN(clock) && (newest === null || clock > newest)) {\n\t\tnewest = clock;\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\tseverity = Number(rows[i].SeverityNumber);\n\tcount = Number(rows[i].count);\n\tif (severity >= 21 && severity <= 24 && !isNaN(count)\n\t\t\t&& (newest === null || Number(rows[i].clock) === newest)) {\n\t\ttotal += count;\n\t}\n}\nreturn total;"
+                                ]
                             },
                             {
                                 "type": "DISCARD_UNCHANGED_HEARTBEAT",
@@ -157,7 +168,9 @@
                                         "tag": "scope",
                                         "value": "notice"
                                     }
-                                ]
+                                ],
+                                "url": "zabbix.php?action=apm.overview&tab=errors&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                "url_name": "APM overview"
                             }
                         ]
                     },
@@ -169,11 +182,10 @@
                         "description": "Number of `Info` severity entries in logs.",
                         "preprocessing": [
                             {
-                                "type": "JSONPATH",
+                                "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "$[?(@.SeverityNumber >= 1 && @.SeverityNumber <= 12)].count.first()"
-                                ],
-                                "error_handler": "DISCARD_VALUE"
+                                    "var rows = JSON.parse(value), newest = null, total = 0, i, clock, severity, count;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result of \"Get logs\": ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tclock = Number(rows[i].clock);\n\tif (!isNaN(clock) && (newest === null || clock > newest)) {\n\t\tnewest = clock;\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\tseverity = Number(rows[i].SeverityNumber);\n\tcount = Number(rows[i].count);\n\tif (severity >= 1 && severity <= 12 && !isNaN(count)\n\t\t\t&& (newest === null || Number(rows[i].clock) === newest)) {\n\t\ttotal += count;\n\t}\n}\nreturn total;"
+                                ]
                             },
                             {
                                 "type": "DISCARD_UNCHANGED_HEARTBEAT",
@@ -200,11 +212,10 @@
                         "description": "Number of `Warning` severity entries in logs.",
                         "preprocessing": [
                             {
-                                "type": "JSONPATH",
+                                "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "$[?(@.SeverityNumber >= 13 && @.SeverityNumber <= 16)].count.first()"
-                                ],
-                                "error_handler": "DISCARD_VALUE"
+                                    "var rows = JSON.parse(value), newest = null, total = 0, i, clock, severity, count;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result of \"Get logs\": ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tclock = Number(rows[i].clock);\n\tif (!isNaN(clock) && (newest === null || clock > newest)) {\n\t\tnewest = clock;\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\tseverity = Number(rows[i].SeverityNumber);\n\tcount = Number(rows[i].count);\n\tif (severity >= 13 && severity <= 16 && !isNaN(count)\n\t\t\t&& (newest === null || Number(rows[i].clock) === newest)) {\n\t\ttotal += count;\n\t}\n}\nreturn total;"
+                                ]
                             },
                             {
                                 "type": "DISCARD_UNCHANGED_HEARTBEAT",
@@ -234,7 +245,9 @@
                                         "tag": "scope",
                                         "value": "notice"
                                     }
-                                ]
+                                ],
+                                "url": "zabbix.php?action=apm.overview&tab=errors&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                "url_name": "APM overview"
                             }
                         ]
                     },
@@ -258,7 +271,7 @@
                             {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -320,7 +333,7 @@
                             {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -395,7 +408,7 @@
                             {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -466,7 +479,7 @@
                             {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -525,7 +538,7 @@
                         "delay": "{$OTLP.FREQUENCY:traces}",
                         "value_type": "FLOAT",
                         "units": "%",
-                        "params": "100*last(//otlp.span.status.error)/(last(//otlp.span.status.ok)+last(//otlp.span.status.error)+last(//otlp.span.status.unset))",
+                        "params": "100*last(//otlp.span.status.error)/(last(//otlp.span.status.ok)+last(//otlp.span.status.error)+last(//otlp.span.status.unset)+((last(//otlp.span.status.ok)+last(//otlp.span.status.error)+last(//otlp.span.status.unset))=0))",
                         "description": "Percentage of error spans.",
                         "preprocessing": [
                             {
@@ -557,7 +570,9 @@
                                         "tag": "scope",
                                         "value": "availability"
                                     }
-                                ]
+                                ],
+                                "url": "zabbix.php?action=apm.overview&tab=errors&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                "url_name": "APM overview"
                             }
                         ]
                     },
@@ -581,7 +596,7 @@
                             {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -591,12 +606,6 @@
                                 ],
                                 "error_handler": "CUSTOM_VALUE",
                                 "error_handler_params": "0"
-                            },
-                            {
-                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
-                                "parameters": [
-                                    "1h"
-                                ]
                             }
                         ],
                         "time_shift": "{$OTLP.TIMESHIFT:traces}",
@@ -645,9 +654,18 @@
                         "description": "Average duration of spans with status code \"Error\".",
                         "preprocessing": [
                             {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "{\"columns\":{}}"
+                            },
+                            {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -655,7 +673,8 @@
                                 "parameters": [
                                     "$.columns.avg"
                                 ],
-                                "error_handler": "DISCARD_VALUE"
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "0"
                             },
                             {
                                 "type": "MULTIPLIER",
@@ -722,7 +741,7 @@
                             {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -732,12 +751,6 @@
                                 ],
                                 "error_handler": "CUSTOM_VALUE",
                                 "error_handler_params": "0"
-                            },
-                            {
-                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
-                                "parameters": [
-                                    "1h"
-                                ]
                             }
                         ],
                         "time_shift": "{$OTLP.TIMESHIFT:traces}",
@@ -786,9 +799,18 @@
                         "description": "Average duration of spans with status code \"Ok\".",
                         "preprocessing": [
                             {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "{\"columns\":{}}"
+                            },
+                            {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -796,7 +818,8 @@
                                 "parameters": [
                                     "$.columns.avg"
                                 ],
-                                "error_handler": "DISCARD_VALUE"
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "0"
                             },
                             {
                                 "type": "MULTIPLIER",
@@ -854,7 +877,9 @@
                                         "tag": "scope",
                                         "value": "notice"
                                     }
-                                ]
+                                ],
+                                "url": "zabbix.php?action=apm.overview&tab=slow&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                "url_name": "APM overview"
                             }
                         ]
                     },
@@ -878,7 +903,7 @@
                             {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -888,12 +913,6 @@
                                 ],
                                 "error_handler": "CUSTOM_VALUE",
                                 "error_handler_params": "0"
-                            },
-                            {
-                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
-                                "parameters": [
-                                    "1h"
-                                ]
                             }
                         ],
                         "time_shift": "{$OTLP.TIMESHIFT:traces}",
@@ -942,9 +961,18 @@
                         "description": "Average duration of spans with status code \"Unset\".",
                         "preprocessing": [
                             {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "{\"columns\":{}}"
+                            },
+                            {
                                 "type": "JAVASCRIPT",
                                 "parameters": [
-                                    "var v = JSON.parse(value);\nreturn Array.isArray(v) ? JSON.stringify({columns: v.length ? v[0] : {}}) : value;"
+                                    "var v = JSON.parse(value), row = {}, columns = {};\nif (!Array.isArray(v)) {\n\treturn value;\n}\nfor (var i = 0; i < v.length; i++) {\n\tif (i === 0 || Number(v[i].clock) > Number(row.clock)) {\n\t\trow = v[i];\n\t}\n}\nfor (var k in row) {\n\tif (row[k] !== null) {\n\t\tcolumns[k] = row[k];\n\t}\n}\nreturn JSON.stringify({columns: columns});"
                                 ]
                             },
                             {
@@ -952,7 +980,8 @@
                                 "parameters": [
                                     "$.columns.avg"
                                 ],
-                                "error_handler": "DISCARD_VALUE"
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "0"
                             },
                             {
                                 "type": "MULTIPLIER",
@@ -1010,7 +1039,9 @@
                                         "tag": "scope",
                                         "value": "notice"
                                     }
-                                ]
+                                ],
+                                "url": "zabbix.php?action=apm.overview&tab=slow&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                "url_name": "APM overview"
                             }
                         ]
                     }
@@ -1133,6 +1164,11 @@
                             "description": "In the range from 0 to 100 inclusive.",
                             "regex": "^-?([0-9]+|(([0-9]+)\\.([0-9]+)))$"
                         }
+                    },
+                    {
+                        "macro": "{$SPAN.NODATA}",
+                        "value": "10m",
+                        "description": "Time without spans after which \"No spans received\" opens."
                     },
                     {
                         "macro": "{$SPAN.OK.DURATION.WARN}",
@@ -1759,6 +1795,24 @@
                                 ]
                             }
                         ]
+                    }
+                ]
+            }
+        ],
+        "triggers": [
+            {
+                "uuid": "22f15f90e9924ebe9363a2bf516c6103",
+                "expression": "(max(/OpenTelemetry application by OTLP/otlp.span.status.unset,{$SPAN.NODATA})=0 and max(/OpenTelemetry application by OTLP/otlp.span.status.ok,{$SPAN.NODATA})=0 and max(/OpenTelemetry application by OTLP/otlp.span.status.error,{$SPAN.NODATA})=0) or nodata(/OpenTelemetry application by OTLP/otlp.span.status.unset,{$SPAN.NODATA})=1",
+                "name": "OpenTelemetry: No spans received",
+                "event_name": "OpenTelemetry: No spans received for {$SPAN.NODATA}",
+                "priority": "AVERAGE",
+                "description": "No span of the application arrived for {$SPAN.NODATA}, or the span counts are not being collected: check that the application and the collector are running and the state of the \"Span: ... count\" items. It closes by itself when spans arrive again.",
+                "url": "zabbix.php?action=apm.overview&tab=status&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                "url_name": "APM overview",
+                "tags": [
+                    {
+                        "tag": "scope",
+                        "value": "availability"
                     }
                 ]
             }

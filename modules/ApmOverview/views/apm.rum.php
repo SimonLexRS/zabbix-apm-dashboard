@@ -43,6 +43,14 @@ $filter = (new CFilter())
 				)
 			])
 			->addItem([
+				new CLabel(I18n::t('Session ID'), 'filter_session'),
+				new CFormField(
+					(new CTextBox('filter_session', $data['filter']['session']))
+						->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
+						->setAttribute('placeholder', I18n::t('all, or part of a session ID'))
+				)
+			])
+			->addItem([
 				new CLabel(I18n::t('Only sessions with failed requests'), 'filter_failed'),
 				new CFormField(
 					(new CCheckBox('filter_failed'))->setChecked($data['filter']['failed'])
@@ -124,6 +132,10 @@ $tabs = (new CTabView())
 		$block(RumLoader::TAB_PAGES)
 	])
 	->addTab('apm-rum-resources', I18n::t('Resources'), $block(RumLoader::TAB_RESOURCES))
+	->addTab('apm-rum-errors', I18n::t('Errors'), [
+		$hint(I18n::t('What fails for the people using the application: errors of the page itself and requests that fail, grouped, each with its state. An error is resolved when it stops happening and comes back by itself if it happens again. The link opens the trace, down to the backend service that failed.')),
+		$block(RumLoader::TAB_ERRORS)
+	])
 	->addTab('apm-rum-sessions', I18n::t('Sessions'), $block(RumLoader::TAB_SESSIONS))
 	->addTab('apm-rum-howto', I18n::t('How it works'), $howto_tab);
 
@@ -219,7 +231,10 @@ $panel = (new CTag('aside', true, [
 	if (typeof CApmOverviewLive === "function") {
 		new CApmOverviewLive('.json_encode([
 			'data_url' => $data['data_url'],
+			'live' => $data['live'],
 			'labels' => [
+				'fixed' => I18n::t('fixed period, not refreshed'),
+				'stale' => I18n::t('Shown as it was at the last successful refresh.'),
 				'updated_s' => I18n::t('Updated %s s ago'),
 				'updated_min' => I18n::t('Updated %s min ago'),
 				'loading' => I18n::t('loading…'),
@@ -239,6 +254,7 @@ $panel = (new CTag('aside', true, [
 	if (typeof CApmRumSessions === "function") {
 		new CApmRumSessions('.json_encode([
 			'session_url' => $data['session_url'],
+			'open' => $data['open_session'],
 			'labels' => [
 				'loading' => I18n::t('Loading…'),
 				'failed' => I18n::t('The session could not be loaded.')

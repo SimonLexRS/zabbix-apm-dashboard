@@ -43,7 +43,8 @@ sudo ./scripts/setup.sh demo <IP>        # optional: test store of about 20 serv
 | Which service or endpoint is doing badly? | **RED metrics:** rate, errors and duration, with trends | APM → Overview |
 | Which error keeps repeating? | **Grouped errors**, with counts, last seen and trace | APM → Overview |
 | Where does the time go? | **Origin of slowness:** code, database or other services, with waterfalls and expensive queries | APM → Overview |
-| What do my users experience? | **RUM:** sessions down to the backend, page loads, resources and Core Web Vitals | APM → Real user monitoring |
+| What do my users experience? | **RUM:** sessions down to the backend, page loads, resources, errors of the page and Core Web Vitals | APM → Real user monitoring |
+| Which user did this backend error hit? | **Trace panel:** session, user and page of any trace, and back | Any trace link |
 | How many orders did each store have today, and how many rooms are free? | **Business KPIs:** the counters and levels of your application (orders, reservations, availability) by attribute, with complete totals, share and rank, a comparison dashboard and items the assistant can read | APM → Overview, host `apm-<application>` |
 | Can I see it next to my monitoring? | **Widgets** APM service map and APM service health | Dashboards |
 | Does it alert me when something goes wrong? | **Template** with items, triggers and a dashboard per application | Host `apm-<application>` |
@@ -115,7 +116,8 @@ More: [user experience](docs/screenshots/user-experience.png) and [origin of slo
 - **Status**: is telemetry arriving? Data source, connection and rows per signal.
 - **Service map**: the state of the system now (incoming traffic, error rate, slowest service, what needs attention) and the live flow from users to services, databases and external services. Arrows are colored by health, as thick as their traffic, with moving particles; hover a service to follow its path and see its figures, and click it to see where its time goes.
 - **Services / Endpoints**: RED metrics (rate, errors, duration) with per-minute trends.
-- **Errors**: failures grouped by service, endpoint and message, with counts, first and last seen, and the latest trace.
+- **Errors**: failures grouped into issues (service, operation, exception, message), each with its state: new, active, came back or resolved. A fixed error becomes resolved by itself.
+- **Trace panel** (any trace link): the spans from the browser to the databases, the logs of the trace, and the session, user and page it came from.
 - **Business KPIs**: the counters, gauges and histograms the application sends (orders, reservations, revenue), with their total of the period, trend and breakdown by attribute ([docs/business-kpis.md](docs/business-kpis.md)).
 - **User experience**: Core Web Vitals ([docs/rum.md](docs/rum.md)), Apdex per service and endpoint, and latency histograms.
 - **Origin of slowness**: time per endpoint (own code / database / other services), the slowest requests with their span waterfall, the most expensive statements and endpoints slower than in the previous period.

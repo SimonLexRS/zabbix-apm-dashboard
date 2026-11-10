@@ -1,5 +1,67 @@
 # Changelog
 
+## 2.5.0
+
+APM and Real user monitoring in one path, in both directions, and errors that know when they are solved.
+
+**From the browser to the backend and back**
+
+- **Trace panel.** Every trace link of the module opens the trace in a side panel instead of leaving the page: the
+  spans from the browser to the databases, a switch to see only the ones that failed, the services of the trace with
+  the ones that failed marked, its log records, the Zabbix host of the application (problems, latest data), and
+  **where it came from**: the browser session, the user, the page and the browser, with a link to the session timeline
+  at that request and to the page in Real user monitoring. The native trace viewer is one click away.
+- **Real user monitoring → Errors** (new tab): errors of the page itself (uncaught exceptions, rejected promises) and
+  requests that fail, grouped, with the page, the sessions affected and the trace down to the backend service that
+  failed. The browser guide now captures those errors and adds `view.id` and `view.path` to every span.
+- **Session timeline:** each page load opens into a waterfall of everything that page loaded and asked for; each
+  request shows how much of its time was the backend and how much the network; page errors are rows of the timeline.
+  A link can open a session at one request (`session`, `trace`). Sessions can be searched by ID.
+- **APM overview:** errors and traces that started in a browser say so, with the number of sessions affected.
+
+**Errors with a state**
+
+- Error groups are now issues: one per service, operation, kind of exception and message, with the numbers and ids of
+  the message replaced by `?`, and counted once, at the deepest span that failed (before, the same failure appeared
+  once per service it crossed, and many groups had no message: it now comes from the exception event when the span
+  has no status message). Errors that only exist in client spans are included.
+- Each group is **New**, **Active**, **Came back** or **Resolved**, worked out from when it happened: nothing is
+  stored and nobody has to close anything. Resolved groups are dimmed, or hidden with the filter.
+- The **service map** and *Needs attention* take their colors from the last minutes of the period (filter: *"Now"
+  window*, 15 by default), so a problem that was fixed stops being red within minutes instead of staying until it
+  leaves the period. The tooltips show both figures.
+- **Template** `OpenTelemetry application by OTLP`: problems close by themselves. Log counts per severity, span
+  counts, durations and the error percentage become 0 when nothing arrives (they kept their last value, or became
+  unsupported, and the problem stayed open for ever); a severity range adds up all its rows; new trigger
+  *No spans received* (`{$SPAN.NODATA}`, 10m); every trigger links to the APM overview of its application. Re-import
+  it with `zabbix-apm-app.py add <application>`.
+
+**Fixed**
+
+- A service that is only called by other services (most of them) showed empty tables when picked on the map: Services,
+  Origin of slowness, Apdex and the histograms only counted the first span of each trace. They now count the requests
+  each service receives, whoever sends them; the health widget does the same.
+- Consumers, timers and other background work that start their own trace were drawn as traffic from *Users*, and
+  counted as incoming traffic.
+- A service with a few requests of its own lost the calls it received from other services in its node figures.
+- Streams and long polls (spans of 5 minutes or more, filter *Open connections from*) no longer decide the slowest
+  service, the p95, the Apdex or the time breakdown; they are still counted.
+- External hosts without dots in their name (`http://payments:8080`, as inside Docker or Kubernetes) appeared as
+  *(unknown)*: the host is now read from the URL, the Envoy cluster, `peer.service`, `rpc.service` and the peer
+  address. Queues (Kafka, RabbitMQ...) are drawn as queues, not as databases.
+- The service picked on the map was saved as the page filter, so it followed you to every tab and to other browser
+  tabs. It now lasts for that view only; the filter form is the only thing that saves.
+- A fixed period is not refreshed (it could not change) and says so; a block whose refresh failed is shown as old.
+- The filter of the map with `?` or `[` in a name; `=name` in the health widget; the latest trace of a group of failing
+  requests is now one that failed; the map and the error list say when they were cut by their limits.
+- `web-vitals.js` sends `service.namespace` (its Web Vitals never reached the page of the application);
+  `zabbix-apm-app.py` and `verify-app.py` close the session they open; `verify-app.py` accepts `1.5m`.
+- `test-rum.py --send-error <OTLP URL>` sends a browser session that fails, to see all of the above without breaking
+  anything.
+
+Not part of OpenTelemetry data, so not here: session replay, code profiling, network performance data and mobile
+SDKs. Errors are not assigned or closed by hand: their state follows the data.
+
 ## 2.4.0
 
 - **Installer** `scripts/setup.sh` for Ubuntu and Debian: `check` (prerequisites, changes nothing), `install`

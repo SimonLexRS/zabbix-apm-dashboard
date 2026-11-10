@@ -105,6 +105,28 @@ en cada span, `service.name` y `service.namespace` de la aplicación, y el recur
 El laboratorio tiene una página instrumentada exactamente así ([lab.es.md](lab.es.md)), y el frontend del
 [OpenTelemetry Demo](../examples/stacks/opentelemetry-demo/README.es.md) llena todas las pestañas.
 
+## Errores: del navegador al backend y de vuelta
+
+| Estás viendo | Llegas a | Cómo |
+|---|---|---|
+| Un error de la página, o una petición que falla (pestaña **Errores**) | La traza, hasta el servicio de backend que falló, y sus logs | El enlace de la traza abre el **panel de traza** |
+| Una petición en la línea de tiempo de una sesión | El mismo panel, y cuánto de la espera fue backend y cuánto red | El enlace de traza de la petición |
+| Un error de backend o una traza lenta (**APM → Overview**) | La sesión, el usuario y la página de donde vino | *De dónde vino*, en el panel de traza |
+| Una carga de página en la línea de tiempo | Todo lo que esa página cargó y pidió, en cascada | *Lo que cargó esta página* |
+
+Los errores se agrupan (página, tipo de excepción, mensaje sin sus números ni ids) y cada grupo tiene un estado, calculado según cuándo ocurrió:
+
+| Estado | Significa |
+|---|---|
+| **Nuevo** | Apareció en los últimos minutos y no había ocurrido antes |
+| **Activo** | Sigue ocurriendo |
+| **Reapareció** | Había parado y está ocurriendo otra vez |
+| **Resuelto** | No ha ocurrido en los últimos minutos (15 por defecto: filtro *Ventana «ahora»* de APM → Overview) |
+
+Nada se cierra a mano: corrige la causa y el grupo pasa a *Resuelto* solo.
+
+Los errores de la propia página necesitan la captura de errores de la guía (**Cómo funciona**): `error` y `unhandledrejection` se convierten en spans fallidos. Las peticiones fallidas no necesitan nada.
+
 ## Cómo hacer testing
 
 ```mermaid
@@ -160,6 +182,14 @@ INFO Web Vitals: none. They need examples/web-vitals.js, or test the path with -
 4. **Devuelve el flag a su valor original.**
 
 ✅ La petición debe aparecer como fallida, con el servicio que falló y el enlace a la traza.
+
+Para verlo sin romper nada, envía una sesión sintética que falla (un error de la página y una petición que falla en un servicio de backend, con su log):
+
+```sh
+python3 scripts/test-rum.py opentelemetry-demo --send-error http://127.0.0.1:4318
+```
+
+✅ **Errores** muestra un `TypeError` como *Nuevo*; su enlace de traza abre el panel. En **APM → Overview → Errores**, `PaymentError` muestra 1 sesión; su panel indica la sesión y la página `/checkout`. Deja de enviar y ambos pasan a *Resuelto* tras la ventana «ahora»; envía otra vez y quedan como *Reapareció*.
 
 ### Nivel 4. Probar los Web Vitals
 

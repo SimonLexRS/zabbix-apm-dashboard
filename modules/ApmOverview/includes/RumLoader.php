@@ -2,7 +2,8 @@
 
 namespace Modules\ApmOverview\Includes;
 
-use DBException;
+use DBException,
+	Modules\ApmOverview\Actions\Overview;
 
 /**
  * Collects what one tab of the Real user monitoring page shows; only the active tab is queried.
@@ -12,11 +13,16 @@ class RumLoader {
 	public const TAB_OVERVIEW = 'overview';
 	public const TAB_PAGES = 'pages';
 	public const TAB_RESOURCES = 'resources';
+	public const TAB_ERRORS = 'errors';
 	public const TAB_SESSIONS = 'sessions';
 	public const TAB_HOWTO = 'howto';
 
 	// Display order of the tabs.
-	public const TABS = [self::TAB_OVERVIEW, self::TAB_PAGES, self::TAB_RESOURCES, self::TAB_SESSIONS, self::TAB_HOWTO];
+	public const TABS = [self::TAB_OVERVIEW, self::TAB_PAGES, self::TAB_RESOURCES, self::TAB_ERRORS, self::TAB_SESSIONS,
+		self::TAB_HOWTO
+	];
+
+	public const ERROR_LIMIT = 50;
 
 	// Window of the instrumentation checks of How it works.
 	public const CHECK_WINDOW = 15 * SEC_PER_MIN;
@@ -66,6 +72,18 @@ class RumLoader {
 
 				case self::TAB_RESOURCES:
 					OverviewLoader::section($data, 'resources', [], fn() => $stats->getResources($time_from, $time_till));
+					OverviewLoader::section($data, 'requests', [], fn() => $stats->getRequests($time_from, $time_till));
+					break;
+
+				case self::TAB_ERRORS:
+					// Same "now" window as the APM overview: one definition of active and resolved.
+					$overview = Overview::getFilter('');
+					$stats->setRecent($overview['recent_min'] * SEC_PER_MIN);
+					$data['errors'] = $stats->getErrorGroups($time_from, $time_till, '', self::ERROR_LIMIT, true);
+					$data['truncated'] = array_keys(array_filter($stats->truncated));
+					$data['error_ctx'] = ['resolved' => $overview['resolved'], 'recent_min' => $overview['recent_min'],
+						'time_till' => $time_till, 'browser' => true
+					];
 					OverviewLoader::section($data, 'requests', [], fn() => $stats->getRequests($time_from, $time_till));
 					break;
 

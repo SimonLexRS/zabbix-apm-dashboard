@@ -144,8 +144,8 @@ OK   Unset average duration: Zabbix 0.0881 s, ClickHouse 0.0881 s
 - A value collected at time T counts the spans of [T − 70 s, T − 10 s) (`{$OTLP.GRANULARITY}` 1m,
   `{$OTLP.TIMESHIFT}` 10s; the script reads both macros from the host). The collection second depends on the item, not
   on the start of the minute, so the script compares each value with exactly those seconds in ClickHouse.
-- The template stores counts only when they change (heartbeat 1 h): the script carries the last value forward, as
-  Zabbix does.
+- Since 2.5.0 the span counts are stored every minute, 0 included, so that problems close by themselves; the outputs
+  above are from before (they say "heartbeat 3600 s", now "expected under 300 s").
 - Tolerance 20 %: only spans that reach ClickHouse after the 10 s time shift make a difference.
 
 ## Repeat it in your environment

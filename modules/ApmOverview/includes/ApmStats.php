@@ -29,6 +29,9 @@ class ApmStats {
 
 	public const HISTOGRAM_BUCKETS = 14;
 
+	// Connections (source, target, system, host) read for the service map.
+	public const CALL_LIMIT = 300;
+
 	/**
 	 * Service filter starting with "=": exactly that service name (links from the map and tables).
 	 */
@@ -51,10 +54,48 @@ class ApmStats {
 	private const DB_SYSTEM = 'multiIf(SpanAttributes[\'db.system.name\']!=\'\',SpanAttributes[\'db.system.name\'],'.
 		'SpanAttributes[\'db.system\']!=\'\',SpanAttributes[\'db.system\'],SpanAttributes[\'messaging.system\'])';
 
-	// Remote host of a client span.
+	// Host of a URL. Not domain(): it returns nothing for a name without dots, as the service names inside Docker or
+	// Kubernetes are (http://payments:8080/).
+	protected const URL_HOST_OPEN = 'extract(';
+	protected const URL_HOST_CLOSE = ',\'^[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^/@?#]*@)?([^/:?#]+)\')';
+
+	// Remote host of a client span: what the instrumentation names first, then the Envoy cluster, then the address.
 	private const PEER_HOST = 'multiIf(SpanAttributes[\'server.address\']!=\'\',SpanAttributes[\'server.address\'],'.
 		'SpanAttributes[\'net.peer.name\']!=\'\',SpanAttributes[\'net.peer.name\'],'.
-		'SpanAttributes[\'url.full\']!=\'\',domain(SpanAttributes[\'url.full\']),domain(SpanAttributes[\'http.url\']))';
+		'SpanAttributes[\'url.full\']!=\'\','.self::URL_HOST_OPEN.'SpanAttributes[\'url.full\']'.self::URL_HOST_CLOSE.','.
+		'SpanAttributes[\'http.url\']!=\'\','.self::URL_HOST_OPEN.'SpanAttributes[\'http.url\']'.self::URL_HOST_CLOSE.','.
+		'SpanAttributes[\'http.host\']!=\'\',SpanAttributes[\'http.host\'],'.
+		'SpanAttributes[\'upstream_cluster.name\']!=\'\',SpanAttributes[\'upstream_cluster.name\'],'.
+		'SpanAttributes[\'upstream_cluster\']!=\'\',SpanAttributes[\'upstream_cluster\'],'.
+		'SpanAttributes[\'peer.service\']!=\'\',SpanAttributes[\'peer.service\'],'.
+		'SpanAttributes[\'rpc.service\']!=\'\',SpanAttributes[\'rpc.service\'],'.
+		'SpanAttributes[\'messaging.destination.name\']!=\'\',SpanAttributes[\'messaging.destination.name\'],'.
+		'SpanAttributes[\'network.peer.address\']!=\'\',SpanAttributes[\'network.peer.address\'],'.
+		'SpanAttributes[\'net.sock.peer.addr\'])';
+
+	/**
+	 * A request received by a service: the first span of a trace, or a span that answers a call or consumes a message.
+	 * The figures of a service mean the same whether users call it directly or other services do.
+	 */
+	public const ENTRY = '(ParentSpanId=\'\' OR SpanKind IN (\'Server\',\'Consumer\'))';
+
+	// Span sent by a browser (OpenTelemetry web SDK).
+	public const BROWSER = 'ResourceAttributes[\'telemetry.sdk.language\']=\'webjs\'';
+
+	// A request that came from outside the traced system: it starts a trace in a browser or in a server span.
+	// Consumers, timers and other background work that start their own trace are not user traffic.
+	private const USER_ENTRY = '(ParentSpanId=\'\' AND (SpanKind=\'Server\' OR '.self::BROWSER.'))';
+
+	/**
+	 * Spans this long are connections kept open (streams, long polls), not requests: they are counted, but left out
+	 * of the latency figures, where they would hide everything else.
+	 */
+	public const LONG_SPAN_DEFAULT = 5 * SEC_PER_MIN;
+
+	/**
+	 * "Now" for health and for the state of the errors: the last minutes of the period.
+	 */
+	public const RECENT_DEFAULT = 15 * SEC_PER_MIN;
 
 	// HTTP status: new semantic conventions (Go, Next.js) first, then the old attribute (Python demo).
 	protected const HTTP_STATUS = 'if(SpanAttributes[\'http.response.status_code\']!=\'\','.
@@ -75,6 +116,15 @@ class ApmStats {
 	 */
 	private ?string $application = null;
 
+	private int $long_span = self::LONG_SPAN_DEFAULT;
+
+	private int $recent = self::RECENT_DEFAULT;
+
+	/**
+	 * Names of the results of the last calls that were cut by their row limit (e.g. 'services', 'calls', 'errors').
+	 */
+	public array $truncated = [];
+
 	/**
 	 * @throws \DBException  If APM data source is not configured or not reachable.
 	 */
@@ -86,6 +136,35 @@ class ApmStats {
 		$this->application = $application;
 
 		return $this;
+	}
+
+	/**
+	 * @param int $seconds  Spans of this duration or longer are left out of the latency figures.
+	 */
+	public function setLongSpan(int $seconds): self {
+		$this->long_span = max(1, $seconds);
+
+		return $this;
+	}
+
+	/**
+	 * @param int $seconds  Length of the recent window (health now, state of the errors).
+	 */
+	public function setRecent(int $seconds): self {
+		$this->recent = max(SEC_PER_MIN, $seconds);
+
+		return $this;
+	}
+
+	public function getRecent(): int {
+		return $this->recent;
+	}
+
+	/**
+	 * Start of the recent window of a period.
+	 */
+	public function recentFrom(int $time_from, int $time_till): int {
+		return max($time_from, $time_till - $this->recent);
 	}
 
 	/**
@@ -181,50 +260,60 @@ class ApmStats {
 	}
 
 	/**
-	 * RED statistics (rate, errors, duration) per service, calculated from root spans, the same way as the native
-	 * trace list defines a trace.
+	 * RED statistics (rate, errors, duration) per service, from the requests each service receives (ENTRY).
 	 *
 	 * @param string $service  Service name pattern, "*" is a wildcard. Empty string matches all services.
 	 *
-	 * @return array  List of ['service', 'requests', 'errors', 'error_rate', 'rpm', 'p50', 'p95', 'p99'],
-	 *                durations in nanoseconds.
+	 * @return array  List of ['service', 'requests', 'errors', 'error_rate', 'rpm', 'p50', 'p95', 'p99', 'browser',
+	 *                'user' => ['requests', 'errors'], 'recent' => ['requests', 'errors', 'error_rate', 'p95']],
+	 *                durations in nanoseconds. "user": the requests that came from outside (see USER_ENTRY); "recent":
+	 *                the last minutes of the period (setRecent()).
 	 */
 	public function getServiceStats(int $time_from, int $time_till, string $service = '',
 			string $sort = self::SORT_REQUESTS, int $limit = 100): array {
-		$query = (new CClickHouseQuery())
-			->select('ServiceName', 'service')
-			->select('count()', 'requests')
-			->select('countIf(StatusCode=\'Error\')', 'errors')
-			->select('quantiles(0.5,0.95,0.99)(Duration)', 'q')
-			->from('otel_traces')
-			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
-			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $time_till]])
-			->where('ParentSpanId=\'\'')
-			->group('ServiceName');
+		$recent = 'Timestamp>=toDateTime64({recent_from:Int32},9)';
+		$latency = $this->latency();
 
-		$this->whereApplication($query);
-
-		if ($service !== '') {
-			$query->where('ServiceName LIKE {service:String}', ['service' => ['String', self::toLikePattern($service)]]);
-		}
-
-		$query
-			->order(self::getSortExpression($sort), ZBX_SORT_DOWN)
-			->order('ServiceName')
-			->limit($limit);
+		$sql = 'SELECT ServiceName AS service, count() AS requests, countIf(StatusCode=\'Error\') AS errors,'.
+				' quantilesIf(0.5,0.95,0.99)(Duration,'.$latency.') AS q,'.
+				' countIf('.self::USER_ENTRY.') AS user_requests,'.
+				' countIf('.self::USER_ENTRY.' AND StatusCode=\'Error\') AS user_errors,'.
+				' countIf('.$recent.') AS recent_requests,'.
+				' countIf('.$recent.' AND StatusCode=\'Error\') AS recent_errors,'.
+				' quantileIf(0.95)(Duration,'.$recent.' AND '.$latency.') AS recent_p95,'.
+				' max('.self::BROWSER.') AS browser'.
+			' FROM otel_traces'.
+			' WHERE '.$this->period().' AND '.self::ENTRY.self::serviceCondition($service).
+			' GROUP BY service'.
+			' ORDER BY '.self::getSortExpression($sort).' DESC, service'.
+			' LIMIT '.($limit + 1);
 
 		$minutes = max(1, ($time_till - $time_from) / SEC_PER_MIN);
+		$rows = $this->fetch($sql, $time_from, $time_till, $service);
+		$this->truncated['services'] = count($rows) > $limit;
 		$services = [];
 
-		foreach (self::rows($this->db, $query->getSql(), $query->getParams()) as $row) {
-			$services[] = ['service' => $row['service']] + self::makeRedRow($row, $minutes);
+		foreach (array_slice($rows, 0, $limit) as $row) {
+			$recent_requests = (int) $row['recent_requests'];
+			$recent_errors = (int) $row['recent_errors'];
+
+			$services[] = ['service' => $row['service']] + self::makeRedRow($row, $minutes) + [
+				'browser' => (bool) $row['browser'],
+				'user' => ['requests' => (int) $row['user_requests'], 'errors' => (int) $row['user_errors']],
+				'recent' => [
+					'requests' => $recent_requests,
+					'errors' => $recent_errors,
+					'error_rate' => $recent_requests > 0 ? $recent_errors / $recent_requests * 100 : 0,
+					'p95' => self::finite($row['recent_p95'])
+				]
+			];
 		}
 
 		return $services;
 	}
 
 	/**
-	 * Per-minute RED series per service, calculated from root spans. To keep the query light, only the last
+	 * Per-minute RED series per service, from the requests each service receives. To keep the query light, only the last
 	 * $minutes complete minutes of the period are used. Minutes without data are filled with zeros.
 	 *
 	 * @param string $service  Service name pattern, "*" is a wildcard. Empty string matches all services.
@@ -247,11 +336,11 @@ class ApmStats {
 			->select('toUnixTimestamp(toStartOfMinute(Timestamp))', 'bucket')
 			->select('count()', 'requests')
 			->select('countIf(StatusCode=\'Error\')', 'errors')
-			->select('quantile(0.95)(Duration)', 'p95')
+			->select('quantileIf(0.95)(Duration,'.$this->latency().')', 'p95')
 			->from('otel_traces')
 			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $series_from]])
 			->where('Timestamp<toDateTime64({time_till:Int32},9)', ['time_till' => ['Int32', $series_till]])
-			->where('ParentSpanId=\'\'')
+			->where(self::ENTRY)
 			->group('ServiceName')
 			->group('bucket');
 
@@ -280,7 +369,7 @@ class ApmStats {
 			$series[$name]['requests'][$bucket] = $requests;
 			$series[$name]['errors'][$bucket] = $errors;
 			$series[$name]['error_rate'][$bucket] = $requests > 0 ? $errors / $requests * 100 : 0;
-			$series[$name]['p95'][$bucket] = (float) $row['p95'];
+			$series[$name]['p95'][$bucket] = self::finite($row['p95']);
 		}
 
 		foreach ($series as &$values) {
@@ -349,7 +438,7 @@ class ApmStats {
 			->select('SpanName', 'endpoint')
 			->select('count()', 'requests')
 			->select('countIf(StatusCode=\'Error\')', 'errors')
-			->select('quantiles(0.5,0.95,0.99)(Duration)', 'q')
+			->select('quantilesIf(0.5,0.95,0.99)(Duration,'.$this->latency().')', 'q')
 			->select('arraySort(groupUniqArray(4)('.self::HTTP_STATUS.'))', 'codes')
 			->from('otel_traces')
 			->where('Timestamp>=toDateTime64({time_from:Int32},9)', ['time_from' => ['Int32', $time_from]])
@@ -389,42 +478,148 @@ class ApmStats {
 	}
 
 	/**
-	 * Failed requests (root or server spans with StatusCode = 'Error') grouped by service, endpoint and message, the
-	 * most recent group first.
+	 * Failures grouped into issues: per service, operation, kind of exception and message, with the changing parts of
+	 * the message (numbers, ids) replaced by "?". A failed trace counts once, at the deepest span that failed, which is
+	 * where the error started; the spans above it only passed it on.
+	 *
+	 * Each group has a state, worked out from when it happened (errorState()), reading one more period before the
+	 * selected one: nothing is stored, a group is resolved when it stops happening.
 	 *
 	 * @param string $service  Service name pattern, "*" is a wildcard. Empty string matches all services.
+	 * @param bool   $browser  True: only errors of the browser; false: all.
 	 *
-	 * @return array  List of ['service', 'endpoint', 'message', 'count', 'first', 'last', 'codes', 'traceid'], the
-	 *                trace ID is the most recent one of the group.
+	 * @return array  List of ['service', 'endpoint', 'type', 'message', 'count', 'first', 'last', 'state', 'recent',
+	 *                'codes', 'traceid', 'sessions', 'page', 'browser', 'series' => int[]], active groups first, then
+	 *                the most recent. "first" is within the two periods read.
 	 */
-	public function getErrorGroups(int $time_from, int $time_till, string $service = '', int $limit = 50): array {
-		$sql = 'SELECT ServiceName AS service, SpanName AS endpoint,'.
-				' substringUTF8(StatusMessage,1,'.self::ERROR_MESSAGE_MAX_LENGTH.') AS message, count() AS count,'.
-				' toUnixTimestamp(min(Timestamp)) AS first, toUnixTimestamp(max(Timestamp)) AS last,'.
-				' arraySort(groupUniqArray(5)('.self::HTTP_STATUS.')) AS codes, argMax(TraceId,Timestamp) AS traceid'.
-			' FROM otel_traces'.
-			' WHERE '.$this->period().' AND StatusCode=\'Error\' AND (ParentSpanId=\'\' OR SpanKind=\'Server\')'.
-				self::serviceCondition($service).
-			' GROUP BY service, endpoint, message'.
-			' ORDER BY last DESC, count DESC'.
-			' LIMIT '.$limit;
+	public function getErrorGroups(int $time_from, int $time_till, string $service = '', int $limit = 50,
+			bool $browser = false): array {
+		$length = max(1, $time_till - $time_from);
+		$read_from = $time_from - $length;
+		$exception = 'Events.Attributes[indexOf(Events.Name,\'exception\')]';
+		$message = 'multiIf(StatusMessage!=\'\',StatusMessage,'.$exception.'[\'exception.message\']!=\'\','.
+			$exception.'[\'exception.message\'],SpanAttributes[\'exception.message\'])';
 
+		$sql = 'SELECT service, endpoint, type, message, count() AS count,'.
+				' toUnixTimestamp(min(ts)) AS first, toUnixTimestamp(max(ts)) AS last,'.
+				' countIf(ts>=toDateTime64({period_start:Int32},9)) AS period_count,'.
+				' countIf(ts>=toDateTime64({recent_from:Int32},9)) AS recent,'.
+				' toUnixTimestamp(minIf(ts,ts>=toDateTime64({recent_from:Int32},9))) AS recent_first,'.
+				' toUnixTimestamp(maxIf(ts,ts<toDateTime64({recent_from:Int32},9))) AS before_last,'.
+				' arraySort(groupUniqArrayIf(5)(code,code!=\'\')) AS codes, argMax(traceid,ts) AS traceid,'.
+				' uniqExactIf(b.session,b.session!=\'\') AS sessions, anyIf(b.page,b.page!=\'\') AS page,'.
+				' max(is_browser) AS browser,'.
+				' sumMapIf([toUInt16(intDiv((toUnixTimestamp(ts)-{period_start:Int32})*'.self::ERROR_SERIES.','.$length.'))],'.
+					'[toUInt64(1)],ts>=toDateTime64({period_start:Int32},9)) AS series'.
+			' FROM ('.
+				'SELECT ServiceName AS service, SpanName AS endpoint, Timestamp AS ts, TraceId AS traceid,'.
+					' '.self::HTTP_STATUS.' AS code, '.self::BROWSER.' AS is_browser,'.
+					' if('.$exception.'[\'exception.type\']!=\'\','.$exception.'[\'exception.type\'],'.
+						'SpanAttributes[\'exception.type\']) AS type,'.
+					' substringUTF8(replaceRegexpAll('.$message.',{volatile:String},\'?\'),1,'.
+						self::ERROR_MESSAGE_MAX_LENGTH.') AS message'.
+				' FROM otel_traces'.
+				' WHERE '.$this->period().' AND StatusCode=\'Error\''.self::serviceCondition($service).
+					($browser ? ' AND '.self::BROWSER : '').
+					' AND (TraceId,SpanId) NOT IN ('.
+						'SELECT TraceId, ParentSpanId FROM otel_traces'.
+						' WHERE '.$this->period().' AND StatusCode=\'Error\' AND ParentSpanId!=\'\''.
+					')'.
+			') AS e'.
+			' LEFT JOIN ('.
+				'SELECT TraceId, any(SpanAttributes[\'session.id\']) AS session,'.
+					' any(path(SpanAttributes[\'url.full\'])) AS page'.
+				' FROM otel_traces'.
+				' WHERE '.$this->period().' AND '.self::BROWSER.' AND SpanAttributes[\'session.id\']!=\'\''.
+				' GROUP BY TraceId'.
+			') AS b ON b.TraceId=e.traceid'.
+			' GROUP BY service, endpoint, type, message'.
+			' HAVING period_count>0'.
+			' ORDER BY recent>0 DESC, last DESC, count DESC'.
+			' LIMIT '.($limit + 1).
+			self::LOW_MEMORY;
+
+		$rows = $this->fetch($sql, $read_from, $time_till, $service, [
+			'period_start' => ['Int32', $time_from],
+			'recent_from' => ['Int32', $this->recentFrom($time_from, $time_till)],
+			'volatile' => ['String', self::VOLATILE_TEXT]
+		]);
+		$this->truncated['errors'] = count($rows) > $limit;
 		$groups = [];
 
-		foreach ($this->fetch($sql, $time_from, $time_till, $service) as $row) {
+		foreach (array_slice($rows, 0, $limit) as $row) {
+			$series = array_fill(0, self::ERROR_SERIES, 0);
+
+			foreach (array_map(null, $row['series'][0] ?? [], $row['series'][1] ?? []) as [$bucket, $count]) {
+				$series[min(self::ERROR_SERIES - 1, (int) $bucket)] += (int) $count;
+			}
+
+			$recent = (int) $row['recent'];
+
 			$groups[] = [
 				'service' => (string) $row['service'],
 				'endpoint' => (string) $row['endpoint'],
+				'type' => (string) $row['type'],
 				'message' => (string) $row['message'],
-				'count' => (int) $row['count'],
+				'count' => (int) $row['period_count'],
 				'first' => (int) $row['first'],
 				'last' => (int) $row['last'],
+				'recent' => $recent,
+				'state' => self::errorState($recent, (int) $row['recent_first'], (int) $row['before_last'], $this->recent),
 				'codes' => self::nonEmpty($row['codes']),
-				'traceid' => (string) $row['traceid']
+				'traceid' => (string) $row['traceid'],
+				'sessions' => (int) $row['sessions'],
+				'page' => (string) $row['page'],
+				'browser' => (bool) $row['browser'],
+				'series' => $series
 			];
 		}
 
 		return $groups;
+	}
+
+	public const STATE_NEW = 'new';
+	public const STATE_ACTIVE = 'active';
+	public const STATE_REGRESSED = 'regressed';
+	public const STATE_RESOLVED = 'resolved';
+
+	// Buckets of the trend of an error group over the period.
+	public const ERROR_SERIES = 30;
+
+	// The parts of an error message that change from one occurrence to the next: UUIDs, hexadecimal ids, numbers.
+	public const VOLATILE_TEXT = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'.
+		'|0x[0-9a-fA-F]+|\\b[0-9a-fA-F]{16,}\\b|\\d+';
+
+	/**
+	 * State of an error group from when it happened.
+	 *
+	 * @param int $recent        Occurrences in the recent window.
+	 * @param int $recent_first  First occurrence in the recent window (0 = none).
+	 * @param int $before_last   Last occurrence before the recent window (0 = none in what was read).
+	 * @param int $window        Length of the recent window, seconds.
+	 *
+	 * @return string  resolved: it stopped happening; new: it was never seen before the recent window; regressed: it
+	 *                 had stopped for longer than the window and came back; active: it keeps happening.
+	 */
+	public static function errorState(int $recent, int $recent_first, int $before_last, int $window): string {
+		if ($recent <= 0) {
+			return self::STATE_RESOLVED;
+		}
+
+		if ($before_last <= 0) {
+			return self::STATE_NEW;
+		}
+
+		return $recent_first - $before_last > $window ? self::STATE_REGRESSED : self::STATE_ACTIVE;
+	}
+
+	/**
+	 * An error message with its changing parts replaced by "?", as the queries group it.
+	 */
+	public static function normalizeMessage(string $message): string {
+		return mb_substr((string) preg_replace('/'.self::VOLATILE_TEXT.'/', '?', $message), 0,
+			self::ERROR_MESSAGE_MAX_LENGTH
+		);
 	}
 
 	/**
@@ -432,14 +627,18 @@ class ApmStats {
 	 * client span whose child is a server span of another service is a call to that service; otherwise it is a call to
 	 * the database system or remote host it names. Measured on the caller's side.
 	 *
-	 * @return array  List of ['source', 'target', 'db_system', 'host', 'calls', 'errors', 'p95'], target is the called
-	 *                service ('' for dependencies), p95 in nanoseconds.
+	 * @return array  List of ['source', 'target', 'db_system', 'host', 'calls', 'errors', 'p95', 'recent' => ['calls',
+	 *                'errors', 'p95']], target is the called service ('' for dependencies), p95 in nanoseconds.
 	 */
 	public function getServiceCalls(int $time_from, int $time_till, string $service = ''): array {
 		$sql = 'SELECT p.ServiceName AS source, c.ServiceName AS target, p.db_system AS db_system, p.host AS host,'.
-				' count() AS calls, countIf(p.StatusCode=\'Error\') AS errors, quantile(0.95)(p.Duration) AS p95'.
+				' count() AS calls, countIf(p.StatusCode=\'Error\') AS errors,'.
+				' quantileIf(0.95)(p.Duration,p.Duration<'.$this->longSpanNs().') AS p95,'.
+				' countIf(p.recent) AS recent_calls, countIf(p.recent AND p.StatusCode=\'Error\') AS recent_errors,'.
+				' quantileIf(0.95)(p.Duration,p.recent AND p.Duration<'.$this->longSpanNs().') AS recent_p95'.
 			' FROM ('.
-				'SELECT TraceId, SpanId, ServiceName, StatusCode, Duration, '.self::DB_SYSTEM.' AS db_system,'.
+				'SELECT TraceId, SpanId, ServiceName, StatusCode, Duration,'.
+					' Timestamp>=toDateTime64({recent_from:Int32},9) AS recent, '.self::DB_SYSTEM.' AS db_system,'.
 					' '.self::PEER_HOST.' AS host'.
 				' FROM otel_traces'.
 				' WHERE '.$this->period().' AND SpanKind IN (\'Client\',\'Producer\')'.self::serviceCondition($service).
@@ -451,13 +650,17 @@ class ApmStats {
 			') AS c ON c.TraceId=p.TraceId AND c.ParentSpanId=p.SpanId'.
 			' GROUP BY source, target, db_system, host'.
 			' ORDER BY calls DESC'.
-			' LIMIT 200'.
+			' LIMIT '.(self::CALL_LIMIT + 1).
 			self::LOW_MEMORY;
 
+		// The recent window belongs to the whole period, not to the part of it that the join reads.
+		$recent_from = $this->recentFrom($time_from, $time_till);
 		[$time_from, $time_till] = self::joinWindow($time_from, $time_till);
+		$rows = $this->fetch($sql, $time_from, $time_till, $service, ['recent_from' => ['Int32', $recent_from]]);
+		$this->truncated['calls'] = count($rows) > self::CALL_LIMIT;
 		$calls = [];
 
-		foreach ($this->fetch($sql, $time_from, $time_till, $service) as $row) {
+		foreach (array_slice($rows, 0, self::CALL_LIMIT) as $row) {
 			$calls[] = [
 				'source' => (string) $row['source'],
 				'target' => (string) $row['target'],
@@ -465,7 +668,12 @@ class ApmStats {
 				'host' => (string) $row['host'],
 				'calls' => (int) $row['calls'],
 				'errors' => (int) $row['errors'],
-				'p95' => (float) $row['p95']
+				'p95' => self::finite($row['p95']),
+				'recent' => [
+					'calls' => (int) $row['recent_calls'],
+					'errors' => (int) $row['recent_errors'],
+					'p95' => self::finite($row['recent_p95'])
+				]
 			];
 		}
 
@@ -473,19 +681,21 @@ class ApmStats {
 	}
 
 	/**
-	 * Where the time of each kind of request goes: per root span name, the average total duration split into the
+	 * Where the time of each kind of request goes: per received request, the average total duration split into the
 	 * service's own work, its database calls and its calls to other services or hosts (client spans of the same
 	 * service in the same trace). Endpoints that consume most time (requests × average) first.
 	 *
 	 * @return array  List of ['service', 'endpoint', 'requests', 'total', 'db', 'calls', 'own', 'p95'], nanoseconds.
 	 */
 	public function getTimeBreakdown(int $time_from, int $time_till, string $service = '', int $limit = 15): array {
+		// A service can receive several requests within one trace: its client time is shared between them (n).
 		$sql = 'SELECT r.ServiceName AS service, r.SpanName AS endpoint, count() AS requests, avg(r.Duration) AS total,'.
-				' avg(k.db) AS db, avg(k.calls) AS calls, quantile(0.95)(r.Duration) AS p95'.
+				' avg(k.db/r.n) AS db, avg(k.calls/r.n) AS calls, quantile(0.95)(r.Duration) AS p95'.
 			' FROM ('.
-				'SELECT TraceId, ServiceName, SpanName, Duration'.
+				'SELECT TraceId, ServiceName, SpanName, Duration,'.
+					' count() OVER (PARTITION BY TraceId, ServiceName) AS n'.
 				' FROM otel_traces'.
-				' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND '.self::ENTRY.' AND '.$this->latency().self::serviceCondition($service).
 			') AS r'.
 			' LEFT JOIN ('.
 				'SELECT TraceId, ServiceName, sumIf(Duration,db_system!=\'\') AS db,'.
@@ -533,20 +743,23 @@ class ApmStats {
 	}
 
 	/**
-	 * Slowest traces of the period (root spans by duration) with their first spans, for the waterfall.
+	 * Slowest requests of the period with their spans, for the waterfall: whole traces (root spans), or, when a service
+	 * is filtered, the requests that service received with what happened below them.
 	 *
 	 * @return array  List of ['traceid', 'service', 'endpoint', 'clock', 'duration', 'error', 'span_count', 'spans'],
-	 *                each span ['id', 'parent', 'service', 'name', 'kind', 'db_system', 'start', 'duration', 'error'],
-	 *                start relative to the trace start, nanoseconds.
+	 *                each span ['id', 'parent', 'service', 'name', 'kind', 'db_system', 'start', 'duration', 'error',
+	 *                'browser'], start relative to the request start, nanoseconds.
 	 */
 	public function getSlowTraces(int $time_from, int $time_till, string $service = '', int $limit = 8,
 			int $span_limit = 40): array {
-		$sql = 'SELECT TraceId AS traceid, ServiceName AS service, SpanName AS endpoint,'.
+		$sql = 'SELECT TraceId AS traceid, SpanId AS spanid, ServiceName AS service, SpanName AS endpoint,'.
 				' toUnixTimestamp(Timestamp) AS clock, toUnixTimestamp64Nano(Timestamp) AS start,'.
 				' Duration AS duration, StatusCode=\'Error\' AS error'.
 			' FROM otel_traces'.
-			' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
+			' WHERE '.$this->period().' AND '.($service !== '' ? self::ENTRY : 'ParentSpanId=\'\'').
+				' AND '.$this->latency().self::serviceCondition($service).
 			' ORDER BY Duration DESC'.
+			' LIMIT 1 BY TraceId'.
 			' LIMIT '.$limit.
 			self::LOW_MEMORY;
 
@@ -555,6 +768,7 @@ class ApmStats {
 		foreach ($this->fetch($sql, $time_from, $time_till, $service) as $row) {
 			$traces[$row['traceid']] = [
 				'traceid' => (string) $row['traceid'],
+				'spanid' => (string) $row['spanid'],
 				'service' => (string) $row['service'],
 				'endpoint' => (string) $row['endpoint'],
 				'clock' => (int) $row['clock'],
@@ -570,13 +784,38 @@ class ApmStats {
 			return [];
 		}
 
-		// Child spans can end a little after the period: one more minute on each side. Spans of every application of
-		// the trace, except those the user may not see, as in the native trace view.
+		foreach ($this->getTraceSpans(array_keys($traces), $time_from, $time_till, self::TRACE_SPAN_READ) as $id => $spans) {
+			$trace = &$traces[$id];
+			$spans = self::subtree($spans, $trace['spanid']);
+			$trace['span_count'] = count($spans);
+
+			foreach (array_slice($spans, 0, $span_limit) as $span) {
+				$span['start'] = max(0, $span['start'] - $trace['start']);
+				$trace['spans'][] = $span;
+			}
+
+			unset($trace);
+		}
+
+		return array_values($traces);
+	}
+
+	// Spans read per trace for the waterfalls and the trace panel.
+	public const TRACE_SPAN_READ = 400;
+
+	/**
+	 * Spans of some traces, oldest first. Spans of every application of the trace, except those the user may not see,
+	 * as in the native trace view. Child spans can end a little after the period: one more minute on each side.
+	 *
+	 * @return array  [traceid => [['id', 'parent', 'service', 'name', 'kind', 'db_system', 'start', 'duration',
+	 *                'error', 'browser'], ...]], start in nanoseconds since the epoch.
+	 */
+	public function getTraceSpans(array $traceids, int $time_from, int $time_till, int $span_limit): array {
 		[$access, $access_params] = self::accessCondition(ApmAccess::TRACES);
 		$sql = 'SELECT TraceId AS traceid, SpanId AS id, ParentSpanId AS parent, ServiceName AS service,'.
 				' SpanName AS name, SpanKind AS kind, '.self::DB_SYSTEM.' AS db_system,'.
 				' toUnixTimestamp64Nano(Timestamp) AS start, Duration AS duration, StatusCode=\'Error\' AS error,'.
-				' count() OVER (PARTITION BY TraceId) AS span_count'.
+				' '.self::BROWSER.' AS browser'.
 			' FROM otel_traces'.
 			' WHERE '.self::PERIOD.($access !== '' ? ' AND '.$access : '').' AND TraceId IN {traceids:Array(String)}'.
 			' ORDER BY TraceId, Timestamp'.
@@ -586,29 +825,55 @@ class ApmStats {
 		$params = [
 			'time_from' => ['Int32', $time_from - SEC_PER_MIN],
 			'time_till' => ['Int32', $time_till + SEC_PER_MIN],
-			'traceids' => ['String', array_keys($traces)]
+			'traceids' => ['String', array_values($traceids)]
 		] + $access_params;
 
-		foreach (self::rows($this->db, $sql, $params) as $row) {
-			$trace = &$traces[$row['traceid']];
-			$trace['span_count'] = (int) $row['span_count'];
+		$traces = [];
 
-			$trace['spans'][] = [
+		foreach (self::rows($this->db, $sql, $params) as $row) {
+			$traces[$row['traceid']][] = [
 				'id' => (string) $row['id'],
 				'parent' => (string) $row['parent'],
 				'service' => (string) $row['service'],
 				'name' => (string) $row['name'],
 				'kind' => (string) $row['kind'],
 				'db_system' => (string) $row['db_system'],
-				'start' => max(0, (int) $row['start'] - $trace['start']),
+				'start' => (int) $row['start'],
 				'duration' => (float) $row['duration'],
-				'error' => (bool) $row['error']
+				'error' => (bool) $row['error'],
+				'browser' => (bool) $row['browser']
 			];
-
-			unset($trace);
 		}
 
-		return array_values($traces);
+		return $traces;
+	}
+
+	/**
+	 * A span and everything below it, in the given order. All the spans if the span is not among them.
+	 */
+	public static function subtree(array $spans, string $root): array {
+		$ids = array_column($spans, 'id');
+
+		if (!in_array($root, $ids, true)) {
+			return $spans;
+		}
+
+		$keep = [$root => true];
+
+		// Spans are ordered by start, so a parent comes before its children, except for clock skew: repeat until stable.
+		do {
+			$added = false;
+
+			foreach ($spans as $span) {
+				if (!array_key_exists($span['id'], $keep) && array_key_exists($span['parent'], $keep)) {
+					$keep[$span['id']] = true;
+					$added = true;
+				}
+			}
+		}
+		while ($added);
+
+		return array_values(array_filter($spans, static fn(array $span): bool => array_key_exists($span['id'], $keep)));
 	}
 
 	/**
@@ -663,8 +928,8 @@ class ApmStats {
 
 		$sql = 'SELECT ServiceName AS service, SpanName AS endpoint,'.
 				' countIf('.$current.') AS requests, countIf(NOT '.$current.') AS previous_requests,'.
-				' quantileIf(0.95)(Duration,'.$current.') AS p95,'.
-				' quantileIf(0.95)(Duration,NOT '.$current.') AS previous_p95'.
+				' quantileIf(0.95)(Duration,'.$current.' AND '.$this->latency().') AS p95,'.
+				' quantileIf(0.95)(Duration,NOT '.$current.' AND '.$this->latency().') AS previous_p95'.
 			' FROM otel_traces'.
 			' WHERE '.$this->period().' AND SpanKind=\'Server\''.self::serviceCondition($service).
 			' GROUP BY service, endpoint'.
@@ -682,8 +947,8 @@ class ApmStats {
 				'endpoint' => (string) $row['endpoint'],
 				'requests' => (int) $row['requests'],
 				'previous_requests' => (int) $row['previous_requests'],
-				'p95' => (float) $row['p95'],
-				'previous_p95' => (float) $row['previous_p95']
+				'p95' => self::finite($row['p95']),
+				'previous_p95' => self::finite($row['previous_p95'])
 			];
 		}
 
@@ -691,7 +956,7 @@ class ApmStats {
 	}
 
 	/**
-	 * Apdex per service (root spans) and the endpoints (server spans) with the lowest score. Satisfied: duration up to
+	 * Apdex per service (received requests) and the endpoints (server spans) with the lowest score. Satisfied: duration up to
 	 * T, tolerating: up to 4T, frustrated: slower or failed.
 	 *
 	 * @param int $threshold  T in nanoseconds.
@@ -707,13 +972,13 @@ class ApmStats {
 		$queries = [
 			'services' => 'SELECT ServiceName AS service, \'\' AS endpoint, '.$counts.
 				' FROM otel_traces'.
-				' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND '.self::ENTRY.' AND '.$this->latency().self::serviceCondition($service).
 				' GROUP BY service'.
 				' ORDER BY requests DESC'.
 				' LIMIT 50',
 			'endpoints' => 'SELECT ServiceName AS service, SpanName AS endpoint, '.$counts.
 				' FROM otel_traces'.
-				' WHERE '.$this->period().' AND SpanKind=\'Server\''.self::serviceCondition($service).
+				' WHERE '.$this->period().' AND SpanKind=\'Server\' AND '.$this->latency().self::serviceCondition($service).
 				' GROUP BY service, endpoint'.
 				' HAVING requests>=5'.
 				' ORDER BY (satisfied+tolerating/2)/requests, requests DESC'.
@@ -745,7 +1010,7 @@ class ApmStats {
 	}
 
 	/**
-	 * Latency distribution of the root spans of the busiest services, in power-of-two millisecond buckets: bucket 0 is
+	 * Latency distribution of the requests received by the busiest services, in power-of-two millisecond buckets: bucket 0 is
 	 * up to 1 ms, bucket k is (2^(k-1), 2^k] ms, the last bucket is everything slower.
 	 *
 	 * @return array  [service => int[HISTOGRAM_BUCKETS]], busiest service first.
@@ -756,7 +1021,7 @@ class ApmStats {
 					' AS bucket,'.
 				' count() AS requests'.
 			' FROM otel_traces'.
-			' WHERE '.$this->period().' AND ParentSpanId=\'\''.self::serviceCondition($service).
+			' WHERE '.$this->period().' AND '.self::ENTRY.' AND '.$this->latency().self::serviceCondition($service).
 			' GROUP BY service, bucket';
 
 		$histograms = [];
@@ -863,7 +1128,11 @@ class ApmStats {
 	 */
 	protected function fetch(string $sql, int $time_from, int $time_till, string $service = '',
 			array $params = []): array {
-		$params += ['time_from' => ['Int32', $time_from], 'time_till' => ['Int32', $time_till]];
+		$params += [
+			'time_from' => ['Int32', $time_from],
+			'time_till' => ['Int32', $time_till],
+			'recent_from' => ['Int32', $this->recentFrom($time_from, $time_till)]
+		];
 
 		if ($service !== '') {
 			$params['service'] = ['String', self::toLikePattern($service)];
@@ -945,6 +1214,24 @@ class ApmStats {
 		return $service !== '' ? ' AND ServiceName LIKE {service:String}' : '';
 	}
 
+	/**
+	 * Condition of the spans that count for latency (see LONG_SPAN_DEFAULT).
+	 */
+	protected function latency(): string {
+		return 'Duration<'.$this->longSpanNs();
+	}
+
+	protected function longSpanNs(): string {
+		return $this->long_span.'000000000';
+	}
+
+	/**
+	 * A quantile over no rows is NaN, which ClickHouse writes as null.
+	 */
+	protected static function finite($value): float {
+		return is_numeric($value) && is_finite((float) $value) ? (float) $value : 0.0;
+	}
+
 	private static function nonEmpty(array $values): array {
 		return array_values(array_filter(array_map('strval', $values), 'strlen'));
 	}
@@ -969,7 +1256,7 @@ class ApmStats {
 	private static function getSortExpression(string $sort): string {
 		return match ($sort) {
 			self::SORT_ERROR_RATE => 'errors/requests',
-			self::SORT_P95 => 'q[2]',
+			self::SORT_P95 => 'ifNotFinite(q[2],0)',
 			default => 'requests'
 		};
 	}
@@ -986,9 +1273,9 @@ class ApmStats {
 			'errors' => $errors,
 			'error_rate' => $requests > 0 ? $errors / $requests * 100 : 0,
 			'rpm' => $requests / $minutes,
-			'p50' => (float) $row['q'][0],
-			'p95' => (float) $row['q'][1],
-			'p99' => (float) $row['q'][2]
+			'p50' => self::finite($row['q'][0] ?? null),
+			'p95' => self::finite($row['q'][1] ?? null),
+			'p99' => self::finite($row['q'][2] ?? null)
 		];
 	}
 }

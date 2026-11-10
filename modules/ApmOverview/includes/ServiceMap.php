@@ -53,7 +53,13 @@ class ServiceMap {
 		'users' => 'Users',
 		'service' => 'Service',
 		'database' => 'Database',
+		'queue' => 'Queue',
 		'external' => 'External service'
+	];
+
+	// Messaging systems (messaging.system): drawn as queues, not as databases.
+	private const QUEUE_SYSTEMS = ['kafka', 'rabbitmq', 'activemq', 'artemis', 'aws_sqs', 'aws.sqs', 'aws_sns',
+		'gcp_pubsub', 'nats', 'pulsar', 'rocketmq', 'servicebus', 'eventhubs', 'eventgrid', 'jms', 'mqtt', 'redis_streams'
 	];
 
 	// 16 × 16 pictograms drawn at the left of each node.
@@ -61,6 +67,7 @@ class ServiceMap {
 		'users' => 'M8 1.5a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM2 14.5c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5z',
 		'service' => 'M8 1 14.5 4.75v6.5L8 15 1.5 11.25v-6.5z',
 		'database' => 'M2 3.5C2 2.1 4.7 1 8 1s6 1.1 6 2.5v9C14 13.9 11.3 15 8 15s-6-1.1-6-2.5zM2 3.5C2 4.9 4.7 6 8 6s6-1.1 6-2.5',
+		'queue' => 'M1.5 4h13v8h-13zM5.5 4v8M9.5 4v8',
 		'external' => 'M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zM1 8h14M8 1c2 2 2.6 4.3 2.6 7S10 13 8 15C6 13 5.4 10.7 5.4 8S6 3 8 1z'
 	];
 
@@ -77,13 +84,10 @@ class ServiceMap {
 
 		$addNode = static function (string $id, string $kind, string $name) use (&$nodes): void {
 			$nodes[$id] ??= ['id' => $id, 'kind' => $kind, 'name' => $name, 'requests' => 0, 'errors' => 0,
-				'rpm' => 0, 'p95' => null, 'layer' => $kind === 'users' ? 0 : 1
+				'rpm' => 0, 'p95' => null, 'now' => null, 'measured' => false, 'browser' => false,
+				'layer' => $kind === 'users' ? 0 : 1
 			];
 		};
-
-		if ($services) {
-			$addNode('users', 'users', I18n::t('Users'));
-		}
 
 		foreach ($services as $service) {
 			$id = 'svc:'.$service['service'];
@@ -92,14 +96,30 @@ class ServiceMap {
 				'requests' => $service['requests'],
 				'errors' => $service['errors'],
 				'rpm' => $service['rpm'],
-				'p95' => $service['p95']
+				'p95' => $service['p95'],
+				'now' => $service['recent'] ?? null,
+				'measured' => true,
+				'browser' => $service['browser'] ?? false
 			]);
-			$nodes['users']['requests'] += $service['requests'];
-			$nodes['users']['rpm'] += $service['rpm'];
 
-			$edges['users>'.$id] = ['from' => 'users', 'to' => $id, 'calls' => $service['requests'],
-				'errors' => $service['errors'], 'rpm' => $service['rpm'], 'p95' => $service['p95']
-			];
+			// Only what came from outside is user traffic: a consumer or a timer that starts its own trace is not.
+			$user = $service['user'] ?? ['requests' => $service['requests'], 'errors' => $service['errors']];
+
+			if ($user['requests'] > 0) {
+				$addNode('users', 'users', I18n::t('Users'));
+				$rpm = $service['requests'] > 0 ? $service['rpm'] * $user['requests'] / $service['requests'] : 0;
+				$nodes['users']['requests'] += $user['requests'];
+				$nodes['users']['rpm'] += $rpm;
+
+				$edges['users>'.$id] = ['from' => 'users', 'to' => $id, 'calls' => $user['requests'],
+					'errors' => $user['errors'], 'rpm' => $rpm, 'p95' => $service['p95'], 'now' => $nodes[$id]['now']
+				];
+			}
+		}
+
+		// Users first, whatever the order of the services.
+		if (array_key_exists('users', $nodes)) {
+			$nodes = ['users' => $nodes['users']] + $nodes;
 		}
 
 		// A client span that was not matched to a server span (the child fell outside the window) but goes to the
@@ -112,13 +132,21 @@ class ServiceMap {
 			}
 		}
 
+		$service_names = array_flip(array_column($services, 'service'));
+
 		foreach ($calls as $call) {
 			$source = 'svc:'.$call['source'];
 			$target = $call['target'];
 			$candidates = $host_targets[$call['source']][$call['host']] ?? [];
 
-			if ($target === '' && $call['db_system'] === '' && count($candidates) == 1) {
-				$target = array_key_first($candidates);
+			if ($target === '' && $call['db_system'] === '') {
+				if (count($candidates) == 1) {
+					$target = array_key_first($candidates);
+				}
+				// The host is the name of a known service (http://cart:8080 inside Docker or Kubernetes).
+				elseif (array_key_exists($call['host'], $service_names)) {
+					$target = $call['host'];
+				}
 			}
 
 			if ($target !== '' && $target !== $call['source']) {
@@ -129,8 +157,9 @@ class ServiceMap {
 				continue;
 			}
 			elseif ($call['db_system'] !== '') {
-				$to = 'db:'.$call['db_system'];
-				$addNode($to, 'database', $call['db_system']);
+				$kind = in_array(strtolower($call['db_system']), self::QUEUE_SYSTEMS, true) ? 'queue' : 'database';
+				$to = ($kind === 'queue' ? 'mq:' : 'db:').$call['db_system'];
+				$addNode($to, $kind, $call['db_system']);
 			}
 			else {
 				$host = $call['host'] !== '' ? $call['host'] : I18n::t('(unknown)');
@@ -141,23 +170,38 @@ class ServiceMap {
 			$addNode($source, 'service', $call['source']);
 
 			$key = $source.'>'.$to;
-			$edges[$key] ??= ['from' => $source, 'to' => $to, 'calls' => 0, 'errors' => 0, 'rpm' => 0, 'p95' => 0];
+			$edges[$key] ??= ['from' => $source, 'to' => $to, 'calls' => 0, 'errors' => 0, 'rpm' => 0, 'p95' => 0,
+				'now' => array_key_exists('recent', $call) ? ['requests' => 0, 'errors' => 0, 'p95' => 0] : null
+			];
 			$edges[$key]['calls'] += $call['calls'];
 			$edges[$key]['errors'] += $call['errors'];
 			$edges[$key]['rpm'] += $call['calls'] / max(1, $call_minutes);
 			// Several groups (hosts, systems) on one edge: the slowest p95 stands for the edge.
 			$edges[$key]['p95'] = max($edges[$key]['p95'], $call['p95']);
+
+			if ($edges[$key]['now'] !== null && array_key_exists('recent', $call)) {
+				$edges[$key]['now']['requests'] += $call['recent']['calls'];
+				$edges[$key]['now']['errors'] += $call['recent']['errors'];
+				$edges[$key]['now']['p95'] = max($edges[$key]['now']['p95'], $call['recent']['p95']);
+			}
 		}
 
-		// Dependencies and services only known as callees: their figures are what their callers saw.
+		// Dependencies, and services that sent no spans of their own in the period: what their callers saw.
 		foreach ($edges as $edge) {
 			$node = &$nodes[$edge['to']];
 
-			if ($edge['from'] !== 'users' && ($node['kind'] !== 'service' || !self::hasRoots($services, $node['name']))) {
+			if ($edge['from'] !== 'users' && !$node['measured']) {
 				$node['requests'] += $edge['calls'];
 				$node['errors'] += $edge['errors'];
 				$node['rpm'] += $edge['rpm'];
 				$node['p95'] = max($node['p95'] ?? 0, $edge['p95']);
+
+				if ($edge['now'] !== null) {
+					$node['now'] ??= ['requests' => 0, 'errors' => 0, 'p95' => 0];
+					$node['now']['requests'] += $edge['now']['requests'];
+					$node['now']['errors'] += $edge['now']['errors'];
+					$node['now']['p95'] = max($node['now']['p95'], $edge['now']['p95']);
+				}
 			}
 
 			unset($node);
@@ -166,6 +210,23 @@ class ServiceMap {
 		self::assignLayers($nodes, $edges);
 
 		return ['nodes' => $nodes, 'edges' => array_values($edges)];
+	}
+
+	/**
+	 * Error rate and p95 that decide the health of a node or an edge: those of the recent window when it was measured
+	 * (a problem that was fixed stops coloring the map within minutes, not when it leaves the period), otherwise those
+	 * of the whole period.
+	 *
+	 * @return array  [float $error_rate, ?float $p95]
+	 */
+	public static function current(array $item): array {
+		$now = $item['now'] ?? null;
+
+		if ($now === null) {
+			return [self::errorRate($item['errors'], $item['requests'] ?? $item['calls']), $item['p95']];
+		}
+
+		return [self::errorRate($now['errors'], $now['requests']), $now['requests'] > 0 ? $now['p95'] : null];
 	}
 
 	/**
@@ -198,8 +259,8 @@ class ServiceMap {
 				continue;
 			}
 
-			$error_rate = self::errorRate($node['errors'], $node['requests']);
-			$health = self::health($error_rate, $node['p95'], $thresholds);
+			[$error_rate, $p95] = self::current($node);
+			$health = self::health($error_rate, $p95, $thresholds);
 			$result['health'][$health]++;
 
 			if ($node['p95'] !== null && ($result['slowest'] === null || $node['p95'] > $result['slowest']['p95'])) {
@@ -207,8 +268,8 @@ class ServiceMap {
 			}
 
 			if ($health !== 'ok') {
-				$attention[] = [$health, $error_rate, $node['p95'] ?? 0, $node['name'],
-					self::reason($error_rate, $node['p95'], $thresholds), $node['name']
+				$attention[] = [$health, $error_rate, $p95 ?? 0, $node['name'],
+					self::reason($error_rate, $p95, $thresholds), $node['name']
 				];
 			}
 		}
@@ -219,12 +280,12 @@ class ServiceMap {
 				continue;
 			}
 
-			$error_rate = self::errorRate($edge['errors'], $edge['calls']);
-			$health = self::health($error_rate, $edge['p95'], $thresholds);
+			[$error_rate, $p95] = self::current($edge);
+			$health = self::health($error_rate, $p95, $thresholds);
 
 			if ($health !== 'ok') {
-				$attention[] = [$health, $error_rate, $edge['p95'], $nodes[$edge['from']]['name'].' → '.
-					$nodes[$edge['to']]['name'], self::reason($error_rate, $edge['p95'], $thresholds),
+				$attention[] = [$health, $error_rate, $p95 ?? 0, $nodes[$edge['from']]['name'].' → '.
+					$nodes[$edge['to']]['name'], self::reason($error_rate, $p95, $thresholds),
 					$nodes[$edge['from']]['name']
 				];
 			}
@@ -455,7 +516,8 @@ class ServiceMap {
 			$d = sprintf('M%.1f,%.1f C%.1f,%.1f %.1f,%.1f %.1f,%.1f', $x1, $y1, $x1 + $dx, $y1, $x2 - $dx, $y2, $x2 - 2, $y2);
 
 			$error_rate = self::errorRate($edge['errors'], $edge['calls']);
-			$health = self::health($error_rate, $edge['p95'], $thresholds);
+			[$now_error_rate, $now_p95] = self::current($edge);
+			$health = self::health($now_error_rate, $now_p95, $thresholds);
 			$from_name = $nodes[$edge['from']]['name'];
 			$to_name = $nodes[$edge['to']]['name'];
 			$width_px = self::edgeWidth($edge['rpm'], $max_rpm);
@@ -464,17 +526,18 @@ class ServiceMap {
 				->addClass('apm-map-edge')
 				->addClass('apm-map-'.$health)
 				->addClass('apm-map-flow-'.self::flowSpeed($edge['rpm']))
-				->addClass($edge['errors'] > 0 ? 'apm-map-erroring' : null)
+				->addClass($now_error_rate > 0 ? 'apm-map-erroring' : null)
 				->addClass($dim ? 'apm-map-dim' : null)
 				->setAttribute('data-apm-edge', $edge['from'].'>'.$edge['to'])
 				->setAttribute('data-from', $edge['from'])
 				->setAttribute('data-to', $edge['to'])
 				->setAttribute('data-tip-title', $from_name.' → '.$to_name)
-				->setAttribute('data-tip', implode("\n", [
+				->setAttribute('data-tip', implode("\n", array_filter([
 					sprintf(I18n::t('Calls: %s (%s/min)'), self::formatCount($edge['calls']), self::formatRate($edge['rpm'])),
 					sprintf(I18n::t('Errors: %s'), sprintf('%.1f %%', $error_rate)),
-					'p95: '.ApmStats::formatDuration($edge['p95'] ?? 0)
-				]))
+					'p95: '.ApmStats::formatDuration($edge['p95'] ?? 0),
+					self::nowLine($edge)
+				])))
 				->addItem(
 					(new CTag('path', true))
 						->addClass('apm-map-line')
@@ -500,7 +563,8 @@ class ServiceMap {
 			[$x, $y] = $positions[$id];
 
 			$error_rate = self::errorRate($node['errors'], $node['requests']);
-			$health = $node['kind'] === 'users' ? 'neutral' : self::health($error_rate, $node['p95'], $thresholds);
+			[$now_error_rate, $now_p95] = self::current($node);
+			$health = $node['kind'] === 'users' ? 'neutral' : self::health($now_error_rate, $now_p95, $thresholds);
 			$name = mb_strlen($node['name']) > self::NAME_MAX_LENGTH
 				? mb_substr($node['name'], 0, self::NAME_MAX_LENGTH - 1).'…'
 				: $node['name'];
@@ -534,6 +598,7 @@ class ServiceMap {
 			if ($node['kind'] !== 'users') {
 				$tip[] = sprintf(I18n::t('Errors: %s'), sprintf('%.1f %%', $error_rate));
 				$tip[] = 'p95: '.($node['p95'] !== null ? ApmStats::formatDuration($node['p95']) : '—');
+				$tip[] = self::nowLine($node);
 			}
 
 			$tip[] = sprintf(I18n::t('Called by: %d · Calls: %d'), $callers[$id] ?? 0, $callees[$id] ?? 0);
@@ -556,7 +621,7 @@ class ServiceMap {
 				->setAttribute('transform', sprintf('translate(%.1f,%.1f)', $x, $y))
 				->setAttribute('data-apm-node', $id)
 				->setAttribute('data-tip-title', $node['name'].' · '.I18n::t(self::KIND_LABELS[$node['kind']]))
-				->setAttribute('data-tip', implode("\n", $tip))
+				->setAttribute('data-tip', implode("\n", array_filter($tip)))
 				->addItem(
 					(new CTag('rect', true))
 						->addClass('apm-map-card')
@@ -601,14 +666,14 @@ class ServiceMap {
 	}
 
 	/**
-	 * Overview page filtered by one service, on the tab that explains where its time goes.
+	 * Overview page looking at one service, on the tab that explains where its time goes. The service travels in the
+	 * URL and is not stored: it lasts as long as that page view.
 	 */
 	public static function getServiceUrl(string $service, string $tab = OverviewHtml::TAB_SLOW): CUrl {
 		return (new CUrl('zabbix.php'))
 			->setArgument('action', 'apm.overview')
 			->setArgument('tab', $tab)
-			->setArgument('filter_service', ApmStats::EXACT_PREFIX.$service)
-			->setArgument('filter_set', 1);
+			->setArgument('service', $service);
 	}
 
 	/**
@@ -620,8 +685,9 @@ class ServiceMap {
 			return $name === substr($pattern, strlen(ApmStats::EXACT_PREFIX));
 		}
 
+		// "*" is the only wildcard, as in the queries: "?" and "[" are plain characters.
 		return str_contains($pattern, '*')
-			? fnmatch($pattern, $name, FNM_NOESCAPE)
+			? (bool) preg_match('/^'.str_replace('\\*', '.*', preg_quote($pattern, '/')).'$/su', $name)
 			: str_contains($name, $pattern);
 	}
 
@@ -743,7 +809,7 @@ class ServiceMap {
 		foreach ($edges as $edge) {
 			$to = &$nodes[$edge['to']];
 
-			if ($to['kind'] === 'database' || $to['kind'] === 'external') {
+			if ($to['kind'] !== 'service' && $to['kind'] !== 'users') {
 				$to['layer'] = max($to['layer'], $nodes[$edge['from']]['layer'] + 1);
 			}
 
@@ -766,8 +832,23 @@ class ServiceMap {
 		return $y;
 	}
 
-	private static function hasRoots(array $services, string $name): bool {
-		return in_array($name, array_column($services, 'service'), true);
+	/**
+	 * Tooltip line with the figures of the recent window, the ones the color comes from.
+	 */
+	private static function nowLine(array $item): string {
+		$now = $item['now'] ?? null;
+
+		if ($now === null) {
+			return '';
+		}
+
+		if ($now['requests'] == 0) {
+			return I18n::t('Now: no traffic');
+		}
+
+		return sprintf(I18n::t('Now: %s errors, p95 %s'),
+			sprintf('%.1f %%', self::errorRate($now['errors'], $now['requests'])), ApmStats::formatDuration($now['p95'])
+		);
 	}
 
 	private static function errorRate(int $errors, int $requests): float {

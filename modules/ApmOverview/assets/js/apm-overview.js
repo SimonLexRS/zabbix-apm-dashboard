@@ -8,8 +8,10 @@
  */
 class CApmOverviewLive {
 
-	constructor({data_url, labels}) {
+	constructor({data_url, labels, live = true}) {
 		this._storage_key = 'apm.overview.live_interval';
+		// A fixed period (not ending "now") has nothing new to load: each tab is loaded once.
+		this._live = live;
 		this._intervals = [10, 30, 0];
 		this._request_timeout = 30000;
 
@@ -35,7 +37,12 @@ class CApmOverviewLive {
 		}
 
 		document.addEventListener('visibilitychange', () => this._schedule());
-		jQuery(document).on('tabsactivate', () => this._onTabChange());
+		// Only the tabs of the page content: the filter is a tab view too.
+		jQuery(document).on('tabsactivate', (e) => {
+			if (e.target.closest === undefined || e.target.closest('.filter-space, .filter-container') === null) {
+				this._onTabChange();
+			}
+		});
 		setInterval(() => this._renderStatus(), 1000);
 
 		// After the tab view has picked the active tab.
@@ -124,7 +131,7 @@ class CApmOverviewLive {
 
 		const block = this._activeBlock();
 
-		if (this._interval === 0 || this._loading !== null || block === null
+		if (!this._live || this._interval === 0 || this._loading !== null || block === null
 				|| document.visibilityState !== 'visible') {
 			return;
 		}
@@ -173,6 +180,8 @@ class CApmOverviewLive {
 					const open = [...block.querySelectorAll('details[data-trace][open]')].map((el) => el.dataset.trace);
 
 					block.innerHTML = response.html;
+					block.classList.remove('apm-overview-stale');
+					block.removeAttribute('title');
 
 					for (const el of block.querySelectorAll('details[data-trace]')) {
 						if (open.length > 0) {
@@ -199,6 +208,12 @@ class CApmOverviewLive {
 				}
 
 				this._error = error.name === 'AbortError' ? this._labels.no_response : this._labels.failed;
+
+				// What is on screen is old: say so on the block itself, not only in the status line.
+				if (block.dataset.apmLoaded) {
+					block.classList.add('apm-overview-stale');
+					block.title = this._labels.stale ?? '';
+				}
 			})
 			.finally(() => {
 				clearTimeout(abort_timer);
@@ -230,6 +245,9 @@ class CApmOverviewLive {
 
 		if (this._loading !== null) {
 			parts.push(this._updated === null ? this._labels.loading : this._labels.refreshing);
+		}
+		else if (!this._live) {
+			parts.push(this._labels.fixed ?? this._labels.paused);
 		}
 		else if (this._interval === 0) {
 			parts.push(this._labels.paused);
@@ -566,7 +584,7 @@ CApmServiceMapInteraction.init();
  */
 class CApmRumSessions {
 
-	constructor({session_url, labels}) {
+	constructor({session_url, labels, open = null}) {
 		this._url = session_url;
 		this._labels = labels;
 		this._panel = document.getElementById('apm-rum-panel');
@@ -587,10 +605,22 @@ class CApmRumSessions {
 		});
 
 		document.addEventListener('keydown', (e) => {
-			if (e.key === 'Escape' && !this._panel.hidden) {
+			// The trace panel opens on top of this one and closes first.
+			if (e.key === 'Escape' && !this._panel.hidden && !CApmTracePanel.isOpen()) {
 				this.close();
 			}
 		});
+
+		// A link from a trace: the session it belongs to, at the request of that trace.
+		if (open !== null) {
+			const opener = document.createElement('span');
+
+			opener.dataset.apmSession = open.session;
+			opener.dataset.from = open.from;
+			opener.dataset.to = open.to;
+			this._highlight = open.trace ?? null;
+			this.open(opener);
+		}
 	}
 
 	open(button) {
@@ -614,6 +644,17 @@ class CApmRumSessions {
 				}
 
 				this._body.innerHTML = response.html;
+
+				if (this._highlight) {
+					const row = this._body.querySelector('[data-apm-trace-row="' + CSS.escape(this._highlight) + '"]');
+
+					if (row !== null) {
+						row.classList.add('apm-rum-highlight');
+						row.scrollIntoView({block: 'center'});
+					}
+
+					this._highlight = null;
+				}
 			})
 			.catch((error) => {
 				if (error.name !== 'AbortError') {
@@ -625,6 +666,132 @@ class CApmRumSessions {
 	close() {
 		this._request?.abort();
 		this._panel.hidden = true;
-		this._opener?.focus();
+
+		if (this._opener !== null && this._opener.isConnected) {
+			this._opener.focus();
+		}
 	}
 }
+
+/**
+ * Trace panel: any link with data-apm-trace opens the trace in a side panel (apm.trace.panel) instead of leaving the
+ * page: spans from the browser to the databases, the session and page it came from, its services and its logs. The HTML
+ * comes rendered and escaped by the server. A modified click (new tab, new window) follows the link to the native
+ * trace viewer. Works on every page of the frontend, dashboards included.
+ */
+class CApmTracePanel {
+
+	static _panel = null;
+	static _request = null;
+	static _opener = null;
+
+	static init() {
+		document.addEventListener('click', (e) => {
+			const link = e.target.closest('[data-apm-trace]');
+
+			if (link !== null) {
+				if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {
+					return;
+				}
+
+				e.preventDefault();
+				CApmTracePanel.open(link);
+			}
+			else if (e.target.closest('.apm-trace-panel-close') !== null) {
+				CApmTracePanel.close();
+			}
+		});
+
+		document.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape' && CApmTracePanel.isOpen()) {
+				e.stopPropagation();
+				CApmTracePanel.close();
+			}
+		}, true);
+	}
+
+	static isOpen() {
+		return CApmTracePanel._panel !== null && !CApmTracePanel._panel.hidden;
+	}
+
+	static _create() {
+		const panel = document.createElement('aside');
+		const head = document.createElement('div');
+		const title = document.createElement('h4');
+		const close = document.createElement('button');
+		const body = document.createElement('div');
+
+		panel.className = 'apm-rum-panel apm-trace-panel';
+		panel.hidden = true;
+		panel.setAttribute('aria-labelledby', 'apm-trace-panel-title');
+		head.className = 'apm-rum-panel-head';
+		title.id = 'apm-trace-panel-title';
+		title.textContent = 'Trace';
+		close.type = 'button';
+		close.className = 'apm-rum-panel-close apm-trace-panel-close';
+		close.setAttribute('aria-label', 'Close');
+		close.textContent = '×';
+		body.className = 'apm-rum-panel-body';
+
+		head.append(title, close);
+		panel.append(head, body);
+		document.body.append(panel);
+
+		return panel;
+	}
+
+	static open(link) {
+		const panel = CApmTracePanel._panel ??= CApmTracePanel._create();
+		const body = panel.querySelector('.apm-rum-panel-body');
+
+		CApmTracePanel._request?.abort();
+		CApmTracePanel._request = new AbortController();
+		CApmTracePanel._opener = link;
+		body.textContent = '…';
+		panel.hidden = false;
+		panel.querySelector('.apm-trace-panel-close').focus();
+
+		const url = new URL('zabbix.php', location.href);
+
+		url.searchParams.set('action', 'apm.trace.panel');
+		url.searchParams.set('traceid', link.dataset.apmTrace);
+		url.searchParams.set('clock', link.dataset.clock);
+
+		fetch(url, {credentials: 'same-origin', signal: CApmTracePanel._request.signal})
+			.then((response) => response.ok ? response.json() : Promise.reject(new Error(response.statusText)))
+			.then((response) => {
+				if (typeof response.html !== 'string') {
+					throw new Error(response.error ?? '');
+				}
+
+				if (typeof response.title === 'string') {
+					panel.querySelector('#apm-trace-panel-title').textContent = response.title;
+				}
+
+				body.innerHTML = response.html;
+			})
+			.catch((error) => {
+				if (error.name !== 'AbortError') {
+					// The link still works: the native trace viewer.
+					body.textContent = '';
+
+					const fallback = document.createElement('a');
+
+					fallback.href = link.href;
+					fallback.textContent = link.href;
+					body.append(fallback);
+				}
+			});
+	}
+
+	static close() {
+		CApmTracePanel._request?.abort();
+		CApmTracePanel._panel.hidden = true;
+
+		if (CApmTracePanel._opener !== null && CApmTracePanel._opener.isConnected) {
+			CApmTracePanel._opener.focus();
+		}
+	}
+}
+
+CApmTracePanel.init();

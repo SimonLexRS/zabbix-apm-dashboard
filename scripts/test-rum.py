@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that the real user monitoring data of an application reaches ClickHouse. Read-only unless --send-sample is used.
+"""Check that the real user monitoring data of an application reaches ClickHouse. Read-only unless --send-sample or --send-error is used.
 
   export CH_URL=http://127.0.0.1:8123 CH_USER=zabbix_ro CH_PASSWORD=...
   python3 scripts/test-rum.py opentelemetry-demo
@@ -7,6 +7,11 @@
 
 --send-sample sends synthetic Core Web Vitals (rum.page = /rum-test, service rum-test) to an OTLP/HTTP logs URL, to test
 that path without a browser. They appear on the RUM pages next to real data until the collector's TTL removes them.
+
+--send-error sends, to an OTLP/HTTP base URL (e.g. http://127.0.0.1:4318), one synthetic browser session that fails: an
+uncaught exception of the page and a request that fails in a backend service, with its log record (services
+rum-test-web and rum-test-api). It shows the Errors tabs, the trace panel and the states of the errors (new, active,
+came back, resolved) without breaking anything; it does not need CH_URL.
 
 Exit code: 0 when every required check passes, 1 otherwise.
 """
@@ -76,12 +81,97 @@ def send_sample(url: str, namespace: str) -> None:
         raise SystemExit(f'Cannot send the sample to {url}: {error}')
 
 
+def send_error(base_url: str, namespace: str) -> None:
+    """One synthetic browser session that fails: a page load, an uncaught exception of the page, and a request that
+    fails in a backend service (same trace), with a log record of that backend. Services rum-test-web and rum-test-api.
+    Run it again to see the errors active; stop running it to see them resolved."""
+    def attribute(key: str, value) -> dict:
+        return {'key': key, 'value': {'stringValue': str(value)}}
+
+    def span(trace: str, name: str, kind: int, start: int, duration_ms: float, attributes: dict, parent: str = '',
+            error: str = '', exception: tuple | None = None) -> dict:
+        data = {
+            'traceId': trace, 'spanId': secrets.token_hex(8), 'name': name, 'kind': kind,
+            'startTimeUnixNano': str(start), 'endTimeUnixNano': str(start + int(duration_ms * 1e6)),
+            'attributes': [attribute(key, value) for key, value in attributes.items()]
+        }
+
+        if parent:
+            data['parentSpanId'] = parent
+        if error:
+            data['status'] = {'code': 2, 'message': error}
+        if exception:
+            data['events'] = [{'timeUnixNano': str(start), 'name': 'exception', 'attributes': [
+                attribute('exception.type', exception[0]), attribute('exception.message', exception[1])
+            ]}]
+
+        return data
+
+    now = time.time_ns()
+    session, view = secrets.token_hex(16), secrets.token_hex(8)
+    order = secrets.randbelow(9000) + 1000
+    site = 'https://rum-test.example.com'
+    common = {'session.id': session, 'view.id': view, 'view.path': '/checkout',
+        'user_agent.original': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)'
+            ' Chrome/140.0.0.0 Safari/537.36'}
+
+    load_trace, error_trace, request_trace = (secrets.token_hex(16) for _ in range(3))
+    load = span(load_trace, 'documentLoad', 1, now - int(3e9), 640, common | {'url.full': site + '/checkout'})
+    script = span(load_trace, 'resourceFetch', 1, now - int(2.9e9), 120, common | {'url.full': site + '/static/app.js'},
+        load['spanId'])
+    page_error = span(error_trace, 'error', 1, now - int(2e9), 1, common | {'url.full': site + '/checkout'},
+        error="Cannot read properties of undefined (reading 'price')",
+        exception=('TypeError', "Cannot read properties of undefined (reading 'price')"))
+    request = span(request_trace, 'HTTP POST', 3, now - int(1e9), 180, common | {'url.full': site + '/api/checkout',
+        'http.request.method': 'POST', 'http.response.status_code': '500'}, error='HTTP 500')
+    server = span(request_trace, 'POST /api/checkout', 2, now - int(0.95e9), 120, {'http.request.method': 'POST',
+        'http.response.status_code': '500', 'http.route': '/api/checkout'}, request['spanId'],
+        error=f'card declined for order {order}', exception=('PaymentError', f'card declined for order {order}'))
+
+    def resource(service: str, browser: bool) -> dict:
+        return {'attributes': [attribute('service.name', service), attribute('service.namespace', namespace)]
+            + ([attribute('telemetry.sdk.language', 'webjs')] if browser else [])}
+
+    payloads = {
+        '/v1/traces': {'resourceSpans': [
+            {'resource': resource('rum-test-web', True),
+                'scopeSpans': [{'scope': {'name': 'rum-test'}, 'spans': [load, script, page_error, request]}]},
+            {'resource': resource('rum-test-api', False), 'scopeSpans': [{'scope': {'name': 'rum-test'}, 'spans': [server]}]}
+        ]},
+        '/v1/logs': {'resourceLogs': [{'resource': resource('rum-test-api', False), 'scopeLogs': [{
+            'scope': {'name': 'rum-test'}, 'logRecords': [{
+                'timeUnixNano': str(now - int(0.9e9)), 'severityText': 'ERROR', 'severityNumber': 17,
+                'body': {'stringValue': f'payment gateway answered 402: card declined for order {order}'},
+                'traceId': request_trace, 'spanId': server['spanId']
+            }]
+        }]}]}
+    }
+
+    for path, payload in payloads.items():
+        url = base_url.rstrip('/') + path
+
+        try:
+            request_ = urllib.request.Request(url, json.dumps(payload).encode(), {'Content-Type': 'application/json'})
+            with urllib.request.urlopen(request_, timeout=30) as response:
+                print(f'sent a failing session to {url}: HTTP {response.status}')
+        except (urllib.error.URLError, OSError) as error:
+            raise SystemExit(f'Cannot send the sample to {url}: {error}')
+
+    print(f'session {session}: APM -> Real user monitoring -> {namespace} -> Errors and Sessions')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('namespace', help='service.namespace of the application')
     parser.add_argument('--minutes', type=int, default=15, help='period to check (default: 15)')
     parser.add_argument('--send-sample', metavar='URL', help='send synthetic Web Vitals to this OTLP/HTTP logs URL')
+    parser.add_argument('--send-error', metavar='URL', help='send a synthetic browser session that fails (a page'
+        ' error and a request that fails in a backend service) to this OTLP/HTTP base URL, e.g. http://127.0.0.1:4318')
     args = parser.parse_args()
+
+    if args.send_error:
+        send_error(args.send_error, args.namespace)
+        return 0
 
     if not os.environ.get('CH_URL'):
         parser.error('set CH_URL (and CH_USER and CH_PASSWORD)')

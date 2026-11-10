@@ -58,6 +58,7 @@ class RumHtml {
 			RumLoader::TAB_OVERVIEW => self::overview($data, $ctx),
 			RumLoader::TAB_PAGES => self::pages($data, $ctx),
 			RumLoader::TAB_RESOURCES => self::resources($data, $ctx),
+			RumLoader::TAB_ERRORS => self::errors($data, $ctx),
 			RumLoader::TAB_SESSIONS => self::sessions($data, $ctx),
 			RumLoader::TAB_HOWTO => self::howto($data),
 			default => new CDiv()
@@ -285,6 +286,37 @@ class RumHtml {
 		]);
 	}
 
+	/**
+	 * What fails in the browser: errors of the page itself (uncaught exceptions, rejected promises) and requests that
+	 * failed, grouped into issues with their state, and the requests that fail most.
+	 */
+	public static function errors(array $data, array $ctx): CDiv {
+		$failing = (new CTableInfo())
+			->setHeader([I18n::t('Request'), 'Host', I18n::t('Failed'), I18n::t('Latest failed trace')])
+			->setNoDataMessage(I18n::t('No failed requests in this period.'));
+
+		foreach ($data['requests'] as $request) {
+			if ($request['failed'] == 0) {
+				continue;
+			}
+
+			$failing->addRow([
+				(new CCol($request['method'].' '.$request['path']))->addClass(ZBX_STYLE_WORDBREAK),
+				self::host($request['host']),
+				sprintf('%s / %s', OverviewHtml::formatCount($request['failed']), OverviewHtml::formatCount($request['count'])),
+				OverviewHtml::traceLink($request['traceid'], $request['clock'])
+			]);
+		}
+
+		return new CDiv([
+			(new CSection(OverviewHtml::errorTable($data['errors'], $data['error_ctx'], $data['truncated'] ?? [])))
+				->setHeader(new CTag('h4', true, I18n::t('Errors in the browser'))),
+			!$data['errors'] ? OverviewHtml::hint(I18n::t('Errors of the page itself appear when the browser sends them: see the error capture step in How it works.')) : null,
+			(new CSection([OverviewHtml::sectionNotice($data, 'requests'), $failing]))
+				->setHeader(new CTag('h4', true, I18n::t('Requests that fail')))
+		]);
+	}
+
 	public static function sessions(array $data, array $ctx): CDiv {
 		$table = (new CTableInfo())
 			->setHeader([I18n::t('Start'), I18n::t('User'), I18n::t('Pages'), I18n::t('Page loads'),
@@ -365,6 +397,16 @@ class RumHtml {
 						OverviewHtml::formatCount($checks['linked']), OverviewHtml::formatCount($checks['request_traces'])
 					)
 					: I18n::t('No requests from the browser.')
+			])
+			->addRow([I18n::t('Page views with an id'), $state($checks['with_view'] > 0, false),
+				sprintf(I18n::t('%s of %s spans carry view.id (the code of the guide adds it)'),
+					OverviewHtml::formatCount($checks['with_view']), OverviewHtml::formatCount($checks['spans'])
+				)
+			])
+			->addRow([I18n::t('Errors of the page'), $state(true, false),
+				sprintf(I18n::t('%s error spans. 0 is normal while nothing fails; they need the error capture of the guide.'),
+					OverviewHtml::formatCount($checks['errors'])
+				)
 			]);
 
 		return new CDiv($table);
@@ -437,7 +479,16 @@ class RumHtml {
 					new CTag('strong', true, $item['page']),
 					(new CSpan(sprintf(I18n::t('load %s'), ApmStats::formatDuration($item['duration']))
 						.($item['fcp'] !== null ? sprintf(I18n::t(' · first content %.0f ms'), $item['fcp']) : '')
-					))->addClass(ZBX_STYLE_GREY)
+					))->addClass(ZBX_STYLE_GREY),
+					self::viewWaterfall($item)
+				];
+				break;
+
+			case 'error':
+				$content = [
+					(new CSpan(I18n::t('Error')))->addClass('apm-rum-kind')->addClass(ZBX_STYLE_RED),
+					(new CSpan($item['message'] !== '' ? $item['message'] : $item['name']))->addClass(ZBX_STYLE_RED),
+					OverviewHtml::traceLink($item['trace'], $item['clock'])
 				];
 				break;
 
@@ -460,6 +511,13 @@ class RumHtml {
 						->addClass('apm-pill')
 						->addClass($item['failed'] ? 'apm-pill-bad' : ($item['client_error'] ? 'apm-pill-warn' : 'apm-pill-good')),
 					(new CSpan(ApmStats::formatDuration($item['duration'])))->addClass(ZBX_STYLE_GREY),
+					// Of what the browser waited, how much the backend worked; the rest is network and queueing.
+					$trace !== null && $trace['duration'] > 0 && $item['duration'] > 0
+						? (new CSpan(sprintf(I18n::t('backend %s · network %s'),
+							ApmStats::formatDuration(min($trace['duration'], $item['duration'])),
+							ApmStats::formatDuration(max(0, $item['duration'] - $trace['duration']))
+						)))->addClass('apm-rum-split')
+						: null,
 					$trace !== null
 						? (new CSpan([
 							'→ ',
@@ -475,7 +533,8 @@ class RumHtml {
 		}
 
 		return (new CTag('li', true, [$offset, (new CSpan($content))->addClass('apm-rum-event')]))
-			->addClass('apm-rum-'.$item['type']);
+			->addClass('apm-rum-'.$item['type'])
+			->setAttribute('data-apm-trace-row', $item['type'] === 'request' ? $item['trace'] : null);
 	}
 
 	/**
@@ -744,6 +803,89 @@ class RumHtml {
 
 	private static function host(string $host): string|CSpan {
 		return $host !== '' ? $host : (new CSpan(I18n::t('same origin')))->addClass(ZBX_STYLE_GREY);
+	}
+
+	// Rows of the waterfall of a view; a page can load hundreds of files.
+	private const VIEW_WATERFALL_LIMIT = 80;
+
+	/**
+	 * Everything a page loaded and asked for, as bars on the time line of that view: where its load time went.
+	 */
+	private static function viewWaterfall(array $view): ?CTag {
+		$loaded = $view['loaded'] ?? [];
+
+		if (!$loaded) {
+			return null;
+		}
+
+		$total = max(1, $view['duration'], max(array_map(
+			static fn(array $row): float => $row['start'] + $row['duration'], $loaded
+		)));
+		$rows = (new CDiv())->addClass('apm-wf');
+
+		foreach (array_slice($loaded, 0, self::VIEW_WATERFALL_LIMIT) as $row) {
+			$path = (string) parse_url($row['label'], PHP_URL_PATH);
+			$left = min(100, max(0, $row['start']) / $total * 100);
+			$width = max(0.3, min(100 - $left, $row['duration'] / $total * 100));
+
+			$rows->addItem(
+				(new CDiv([
+					(new CDiv([
+						(new CSpan($row['type'] === 'request' ? I18n::t('request') : $row['kind']))->addClass('apm-wf-service'),
+						' ',
+						(new CSpan($path !== '' ? $path : $row['label']))->addClass($row['failed'] ? ZBX_STYLE_COLOR_NEGATIVE : null)
+					]))->addClass('apm-wf-name')->setTitle($row['label']),
+					(new CDiv(
+						(new CDiv())
+							->addClass('apm-wf-span')
+							->addClass($row['type'] === 'request' ? 'apm-wf-calls' : 'apm-wf-browser')
+							->addClass($row['failed'] ? 'apm-wf-error' : null)
+							->addStyle(sprintf('left: %.2f%%; width: %.2f%%;', $left, $width))
+					))->addClass('apm-wf-track'),
+					(new CDiv(ApmStats::formatDuration($row['duration'])))->addClass('apm-wf-duration')
+				]))->addClass('apm-wf-row')
+			);
+		}
+
+		return (new CTag('details', true, [
+			new CTag('summary', true, sprintf(I18n::t('What this page loaded: %d resources and requests'), count($loaded))),
+			$rows,
+			count($loaded) > self::VIEW_WATERFALL_LIMIT
+				? OverviewHtml::hint(sprintf(I18n::t('The first %d are shown.'), self::VIEW_WATERFALL_LIMIT))
+				: null
+		]))->addClass('apm-rum-view-wf');
+	}
+
+	/**
+	 * Pages tab filtered by one page, optionally of another application.
+	 */
+	public static function pageUrl(string $page, ?string $application = null): string {
+		return self::url(RumLoader::TAB_PAGES, ($application !== null ? ['filter_app' => $application] : [])
+			+ ['filter_page' => $page]
+		);
+	}
+
+	/**
+	 * Sessions tab with the timeline of one session open, optionally at the request of a trace.
+	 *
+	 * @param int $time_from  Start of the session (or of what is known of it).
+	 */
+	public static function sessionUrl(string $application, string $session, int $time_from, int $time_till,
+			string $traceid = ''): string {
+		$url = (new CUrl('zabbix.php'))
+			->setArgument('action', 'apm.rum')
+			->setArgument('tab', RumLoader::TAB_SESSIONS)
+			->setArgument('filter_set', 1)
+			->setArgument('filter_app', $application)
+			->setArgument('session', $session)
+			->setArgument('session_from', $time_from - SEC_PER_MIN)
+			->setArgument('session_to', $time_till + SEC_PER_MIN);
+
+		if ($traceid !== '') {
+			$url->setArgument('trace', $traceid);
+		}
+
+		return $url->getUrl();
 	}
 
 	/**

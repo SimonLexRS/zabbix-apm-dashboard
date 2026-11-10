@@ -32,7 +32,7 @@ $filter = (new CFilter())
 			->addItem([
 				new CLabel(I18n::t('Service'), 'filter_service'),
 				new CFormField(
-					(new CTextBox('filter_service', $data['filter']['service']))
+					(new CTextBox('filter_service', $data['filter']['stored_service']))
 						->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
 						->setAttribute('list', 'apm-service-names')
 						->setAttribute('autocomplete', 'off')
@@ -60,6 +60,28 @@ $filter = (new CFilter())
 						->setTitle(sprintf(I18n::t('Between %d and %d ms. A request is satisfied if it responds in T or less.'),
 							Overview::APDEX_MIN, Overview::APDEX_MAX
 						))
+				)
+			])
+			->addItem([
+				new CLabel(I18n::t('"Now" window (min)'), 'filter_recent'),
+				new CFormField(
+					(new CNumericBox('filter_recent', $data['filter']['recent_min'], 4))
+						->setWidth(ZBX_TEXTAREA_NUMERIC_STANDARD_WIDTH)
+						->setTitle(I18n::t('The last minutes of the period. They decide the colors of the service map and whether an error is active or resolved.'))
+				)
+			])
+			->addItem([
+				new CLabel(I18n::t('Open connections from (s)'), 'filter_long'),
+				new CFormField(
+					(new CNumericBox('filter_long', $data['filter']['long_s'], 5))
+						->setWidth(ZBX_TEXTAREA_NUMERIC_STANDARD_WIDTH)
+						->setTitle(I18n::t('Spans this long are streams or long polls, not requests: they are counted, but left out of the latency figures.'))
+				)
+			])
+			->addItem([
+				new CLabel(I18n::t('Show resolved errors'), 'filter_resolved'),
+				new CFormField(
+					(new CCheckBox('filter_resolved'))->setChecked($data['filter']['resolved'])
 				)
 			])
 	]);
@@ -107,15 +129,20 @@ $service_note = $data['filter']['service'] !== ''
 	? (new CDiv([
 		new CSpan([
 			I18n::t('Filtering by service: '),
-			new CTag('strong', true, ltrim($data['filter']['service'], ApmStats::EXACT_PREFIX)),
-			str_starts_with($data['filter']['service'], ApmStats::EXACT_PREFIX)
-				? I18n::t(' (exact name)')
-				: I18n::t(' (names containing the text)'),
+			new CTag('strong', true, str_starts_with($data['filter']['service'], ApmStats::EXACT_PREFIX)
+				? substr($data['filter']['service'], strlen(ApmStats::EXACT_PREFIX))
+				: $data['filter']['service']
+			),
+			$data['filter']['focus'] !== ''
+				? I18n::t(' (picked on the map or in a table; it lasts until you leave this view)')
+				: (str_starts_with($data['filter']['service'], ApmStats::EXACT_PREFIX)
+					? I18n::t(' (exact name)')
+					: I18n::t(' (names containing the text)')),
 			I18n::t('. The service map shows the whole application and highlights this service.')
 		]),
-		(new CLink(I18n::t('Clear filter'), OverviewHtml::getClearFilterUrl($data['selected_tab'] !== null
-			? OverviewHtml::TABS[$data['selected_tab']]
-			: OverviewHtml::TAB_MAP
+		(new CLink(I18n::t('Clear filter'), OverviewHtml::getClearFilterUrl(
+			$data['selected_tab'] !== null ? OverviewHtml::TABS[$data['selected_tab']] : OverviewHtml::TAB_MAP,
+			$data['filter']['focus'] !== ''
 		)))->addClass(ZBX_STYLE_BTN_ALT)
 	]))->addClass('apm-overview-service-filter')
 	: null;
@@ -128,7 +155,7 @@ $map_tab = [
 ];
 
 $services_tab = [
-	$hint(sprintf(I18n::t('One row per service, calculated from the root spans (one request = one trace). Error rate: warning from 1 %%, problem from 5 %%. The trends show the last %d minutes of the period, minute by minute.'),
+	$hint(sprintf(I18n::t('One row per service, from the requests it receives, whether users or other services send them. Error rate: warning from 1 %%, problem from 5 %%. The trends show the last %d minutes of the period, minute by minute.'),
 		ApmStats::SERIES_MINUTES
 	)),
 	$block(OverviewHtml::TAB_SERVICES)
@@ -140,8 +167,8 @@ $endpoints_tab = [
 ];
 
 $errors_tab = [
-	$hint(sprintf(I18n::t('Failed requests (root or server spans with status Error) grouped by service, endpoint and message, most recent first (up to %d groups). The link opens the latest trace of the group.'),
-		Modules\ApmOverview\Includes\OverviewLoader::ERROR_LIMIT
+	$hint(sprintf(I18n::t('Failures grouped by service, operation, kind of error and message. Each failed request counts once, where it failed first. An error is resolved when it stops happening for %d minutes, and comes back by itself if it happens again. The link opens the latest trace of the group.'),
+		$data['filter']['recent_min']
 	)),
 	$block(OverviewHtml::TAB_ERRORS)
 ];
@@ -399,7 +426,10 @@ if ($data['filter']['endpoint_service'] !== '') {
 	if (typeof CApmOverviewLive === "function") {
 		new CApmOverviewLive('.json_encode([
 			'data_url' => $data['data_url'],
+			'live' => $data['live'],
 			'labels' => [
+				'fixed' => I18n::t('fixed period, not refreshed'),
+				'stale' => I18n::t('Shown as it was at the last successful refresh.'),
 				'updated_s' => I18n::t('Updated %s s ago'),
 				'updated_min' => I18n::t('Updated %s min ago'),
 				'loading' => I18n::t('loading…'),

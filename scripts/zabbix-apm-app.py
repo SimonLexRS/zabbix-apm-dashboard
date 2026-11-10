@@ -328,22 +328,31 @@ def main() -> int:
     if not url or not (token or (user and password)):
         parser.error('set ZABBIX_URL and ZABBIX_API_TOKEN (or ZABBIX_USER and ZABBIX_PASSWORD)')
 
+    if args.command == 'add' and not args.namespace.strip():
+        parser.error('the namespace cannot be empty')
+
     api = Api(url, token or '')
 
     if not token:
         api.token = api.call('user.login', {'username': user, 'password': password})
 
-    if args.command == 'add':
-        if not args.namespace.strip():
-            parser.error('the namespace cannot be empty')
-        add(api, args.namespace.strip(), args.name, args.timeshift, args.kpi)
+    try:
+        if args.command == 'add':
+            add(api, args.namespace.strip(), args.name, args.timeshift, args.kpi)
 
-        if args.kpi:
-            print(f'  in 2-3 minutes: python3 scripts/zabbix-apm-app.py kpi-dashboard {args.namespace.strip()}')
-    elif args.command == 'kpi-dashboard':
-        kpi_dashboard(api, args.namespace.strip())
-    else:
-        list_apps(api)
+            if args.kpi:
+                print(f'  in 2-3 minutes: python3 scripts/zabbix-apm-app.py kpi-dashboard {args.namespace.strip()}')
+        elif args.command == 'kpi-dashboard':
+            kpi_dashboard(api, args.namespace.strip())
+        else:
+            list_apps(api)
+    finally:
+        # Only the session opened here is closed; an API token is never invalidated.
+        if not token:
+            try:
+                api.call('user.logout', [])
+            except (Exception, SystemExit) as error:
+                print(f'could not close the Zabbix session: {error}', file=sys.stderr)
 
     return 0
 

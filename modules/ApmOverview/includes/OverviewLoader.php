@@ -4,6 +4,7 @@ namespace Modules\ApmOverview\Includes;
 
 use API,
 	CRoleHelper,
+	Modules\ApmOverview\Actions\Overview,
 	CSettingsHelper,
 	CWebUser,
 	DBException;
@@ -36,7 +37,10 @@ class OverviewLoader {
 		$service = $filter['service'];
 
 		try {
-			$stats = (new ApmStats())->setApplication($filter['application']);
+			$stats = (new ApmStats())
+				->setApplication($filter['application'])
+				->setRecent(($filter['recent_min'] ?? Overview::RECENT_DEFAULT) * SEC_PER_MIN)
+				->setLongSpan($filter['long_s'] ?? Overview::LONG_DEFAULT);
 
 			switch ($tab) {
 				case OverviewHtml::TAB_STATUS:
@@ -51,6 +55,7 @@ class OverviewLoader {
 					$data['services'] = $stats->getServiceStats($time_from, $time_till);
 					$data['calls'] = $stats->getServiceCalls($time_from, $time_till);
 					$data['call_minutes'] = max(1, ($call_till - $call_from) / SEC_PER_MIN);
+					$data['truncated'] = array_keys(array_filter($stats->truncated));
 					break;
 
 				case OverviewHtml::TAB_SERVICES:
@@ -66,6 +71,7 @@ class OverviewLoader {
 
 				case OverviewHtml::TAB_ERRORS:
 					$data['errors'] = $stats->getErrorGroups($time_from, $time_till, $service, self::ERROR_LIMIT);
+					$data['truncated'] = array_keys(array_filter($stats->truncated));
 					break;
 
 				case OverviewHtml::TAB_KPI:
@@ -136,7 +142,7 @@ class OverviewLoader {
 	 *
 	 * @return array|null  ['hostid', 'name', 'template' => bool, 'kpi' => bool, 'namespace' => ?string]
 	 */
-	private static function findHost(string $application): ?array {
+	public static function findHost(string $application): ?array {
 		$hosts = API::Host()->get([
 			'output' => ['hostid', 'name'],
 			'filter' => ['host' => Integration::hostName($application)],

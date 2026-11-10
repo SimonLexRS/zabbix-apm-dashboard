@@ -12,7 +12,7 @@ class RumStats extends ApmStats {
 	public const TIMELINE_LIMIT = 2000;
 
 	// Spans sent from a browser by the OpenTelemetry web SDK.
-	private const BROWSER = 'ResourceAttributes[\'telemetry.sdk.language\']=\'webjs\'';
+	public const VIEW_SPAN = 'documentLoad';
 
 	private const SESSION = 'SpanAttributes[\'session.id\']';
 	private const USER = 'SpanAttributes[\'enduser.id\']';
@@ -21,6 +21,12 @@ class RumStats extends ApmStats {
 	// One action per user event: the instrumentation adds a span per event listener, nested under the first one.
 	private const IS_ACTION = 'SpanAttributes[\'event_type\']!=\'\' AND ParentSpanId=\'\'';
 	private const IS_REQUEST = 'SpanKind=\'Client\'';
+
+	// A file the page loaded (script, style, image...).
+	private const IS_RESOURCE = 'SpanName=\'resourceFetch\'';
+
+	// An error of the page itself (uncaught exception, rejected promise): a failed span that is not a request.
+	private const IS_ERROR = '(StatusCode=\'Error\' AND SpanKind!=\'Client\')';
 	private const USER_AGENT = 'if(ResourceAttributes[\'user_agent.original\']!=\'\','.
 		'ResourceAttributes[\'user_agent.original\'],SpanAttributes[\'user_agent.original\'])';
 
@@ -226,7 +232,8 @@ class RumStats extends ApmStats {
 			'waiting' => (float) $row['waiting'],
 			'download' => (float) $row['download']
 		], $this->fetch(
-			'SELECT '.sprintf(self::RESOURCE_TYPE, self::URL).' AS type, domain('.self::URL.') AS host,'.
+			'SELECT '.sprintf(self::RESOURCE_TYPE, self::URL).' AS type,'.
+				' '.self::URL_HOST_OPEN.self::URL.self::URL_HOST_CLOSE.' AS host,'.
 				' count() AS count, quantile(0.75)(Duration) AS p75,'.
 				' ifNull(avg('.self::eventMs('domainLookupEnd').'-'.self::eventMs('domainLookupStart').'),0) AS dns,'.
 				' ifNull(avg('.self::eventMs('connectEnd').'-'.self::eventMs('connectStart').'),0) AS connection,'.
@@ -259,10 +266,13 @@ class RumStats extends ApmStats {
 			'traceid' => $row['traceid'],
 			'clock' => (int) $row['clock']
 		], $this->fetch(
-			'SELECT '.$method.' AS method, domain('.self::URL.') AS host, '.self::pageOf(self::URL).' AS path,'.
+			'SELECT '.$method.' AS method, '.self::URL_HOST_OPEN.self::URL.self::URL_HOST_CLOSE.' AS host,'.
+				' '.self::pageOf(self::URL).' AS path,'.
 				' if('.self::HTTP_STATUS.'=\'\',\'—\',concat(left('.self::HTTP_STATUS.',1),\'xx\')) AS status,'.
 				' count() AS count, countIf('.self::failed().') AS failed, quantile(0.75)(Duration) AS p75,'.
-				' argMax(TraceId,Timestamp) AS traceid, toUnixTimestamp(max(Timestamp)) AS clock'.
+				// A group that fails links to a request that failed, not just to its latest one.
+				' if(failed>0,argMaxIf(TraceId,Timestamp,'.self::failed().'),argMax(TraceId,Timestamp)) AS traceid,'.
+				' toUnixTimestamp(if(failed>0,maxIf(Timestamp,'.self::failed().'),max(Timestamp))) AS clock'.
 			$this->browserWhere().' AND '.self::IS_REQUEST.
 			' GROUP BY method, host, path, status'.
 			' ORDER BY failed DESC, count DESC'.
@@ -330,6 +340,11 @@ class RumStats extends ApmStats {
 			$having[] = 'failed>0';
 		}
 
+		if (($filter['session'] ?? '') !== '') {
+			$having[] = 'session LIKE {session_like:String}';
+			$params['session_like'] = ['String', '%'.addcslashes($filter['session'], '\\%_').'%'];
+		}
+
 		return array_map(static fn(array $row): array => [
 			'session' => $row['session'],
 			'user' => $row['user'],
@@ -368,7 +383,9 @@ class RumStats extends ApmStats {
 	 */
 	public function getSessionTimeline(string $session, int $time_from, int $time_till): array {
 		$rows = $this->fetch(
-			'SELECT multiIf('.self::IS_VIEW.',\'view\','.self::IS_ACTION.',\'action\',\'request\') AS type,'.
+			'SELECT multiIf('.self::IS_VIEW.',\'view\','.self::IS_ACTION.',\'action\','.self::IS_RESOURCE.',\'resource\','.
+				self::IS_ERROR.',\'error\',\'request\') AS type,'.
+				' SpanName AS name, StatusMessage AS message, '.sprintf(self::RESOURCE_TYPE, self::URL).' AS kind,'.
 				' TraceId AS trace, toUnixTimestamp64Nano(Timestamp) AS start, Duration AS duration,'.
 				' toUnixTimestamp(Timestamp) AS clock, ServiceName AS service, '.self::URL.' AS url,'.
 				' '.self::pageOf(self::URL).' AS page,'.
@@ -379,7 +396,8 @@ class RumStats extends ApmStats {
 				' '.self::HTTP_STATUS.' AS status, '.self::failed().' AS failed, '.self::clientError().' AS client_error,'.
 				' '.self::eventMs('firstContentfulPaint').' AS fcp'.
 			$this->browserWhere().' AND '.self::SESSION.'={session:String}'.
-				' AND ('.self::IS_VIEW.' OR '.self::IS_ACTION.' OR '.self::IS_REQUEST.')'.
+				' AND ('.self::IS_VIEW.' OR '.self::IS_ACTION.' OR '.self::IS_REQUEST.' OR '.self::IS_RESOURCE.
+					' OR '.self::IS_ERROR.')'.
 			' ORDER BY Timestamp'.
 			' LIMIT '.(self::TIMELINE_LIMIT + 1).
 			self::LOW_MEMORY,
@@ -418,6 +436,9 @@ class RumStats extends ApmStats {
 
 		$spans = array_map(static fn(array $row): array => [
 			'type' => $row['type'],
+			'name' => $row['name'],
+			'message' => $row['message'],
+			'kind' => $row['kind'],
 			'trace' => $row['trace'],
 			'start' => (int) $row['start'],
 			'duration' => (float) $row['duration'],
@@ -450,12 +471,13 @@ class RumStats extends ApmStats {
 			'SELECT count() AS spans, countIf('.self::SESSION.'!=\'\') AS with_session,'.
 				' countIf('.self::IS_VIEW.') AS views, countIf('.self::IS_ACTION.') AS actions,'.
 				' countIf('.self::IS_REQUEST.') AS requests,'.
+				' countIf('.self::IS_ERROR.') AS errors, countIf(SpanAttributes[\'view.id\']!=\'\') AS with_view,'.
 				' uniqExactIf(TraceId,'.self::IS_REQUEST.') AS request_traces,'.
 				' groupUniqArray(10)(ServiceName) AS services'.
 			$this->browserWhere(),
 			$time_from, $time_till
-		)[0] ?? ['spans' => 0, 'with_session' => 0, 'views' => 0, 'actions' => 0, 'requests' => 0,
-			'request_traces' => 0, 'services' => []];
+		)[0] ?? ['spans' => 0, 'with_session' => 0, 'views' => 0, 'actions' => 0, 'requests' => 0, 'errors' => 0,
+			'with_view' => 0, 'request_traces' => 0, 'services' => []];
 
 		$linked = 0;
 
@@ -476,6 +498,8 @@ class RumStats extends ApmStats {
 			'views' => (int) $row['views'],
 			'actions' => (int) $row['actions'],
 			'requests' => (int) $row['requests'],
+			'errors' => (int) $row['errors'],
+			'with_view' => (int) $row['with_view'],
 			'request_traces' => (int) $row['request_traces'],
 			'linked' => $linked,
 			'services' => $row['services']
@@ -486,7 +510,7 @@ class RumStats extends ApmStats {
 		return ' FROM otel_traces WHERE '.$this->period().' AND '.self::BROWSER;
 	}
 
-	private static function pageOf(string $url): string {
+	protected static function pageOf(string $url): string {
 		return sprintf(self::PAGE_OF, $url);
 	}
 

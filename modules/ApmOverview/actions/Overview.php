@@ -27,6 +27,16 @@ class Overview extends CController {
 	public const APDEX_MIN = 10;
 	public const APDEX_MAX = 60000;
 
+	// Recent window (minutes): health now and the state of the errors.
+	public const RECENT_DEFAULT = 15;
+	public const RECENT_MIN = 1;
+	public const RECENT_MAX = 1440;
+
+	// Spans of this many seconds or more are open connections, left out of the latency figures.
+	public const LONG_DEFAULT = 300;
+	public const LONG_MIN = 1;
+	public const LONG_MAX = 86400;
+
 	protected function init(): void {
 		$this->disableCsrfValidation();
 	}
@@ -37,6 +47,10 @@ class Overview extends CController {
 			'filter_service' => 'string',
 			'filter_sort' => 'in '.implode(',', [ApmStats::SORT_REQUESTS, ApmStats::SORT_ERROR_RATE, ApmStats::SORT_P95]),
 			'filter_apdex' => 'int32',
+			'filter_recent' => 'int32',
+			'filter_long' => 'int32',
+			'filter_resolved' => 'in 0,1',
+			'service' => 'string',
 			'filter_set' => 'in 1',
 			'filter_rst' => 'in 1',
 			'tab' => 'in '.implode(',', OverviewHtml::TABS),
@@ -64,7 +78,7 @@ class Overview extends CController {
 				CProfile::delete(self::PROFILE_IDX.'.filter_service');
 			}
 
-			// Only what was sent: a link from the service map changes the service and keeps the rest.
+			// Only what was sent: the application tabs send the application and keep the rest.
 			if ($this->hasInput('filter_service')) {
 				CProfile::update(self::PROFILE_IDX.'.filter_service', trim($this->getInput('filter_service')),
 					PROFILE_TYPE_STR
@@ -80,11 +94,33 @@ class Overview extends CController {
 					min(self::APDEX_MAX, max(self::APDEX_MIN, (int) $this->getInput('filter_apdex'))), PROFILE_TYPE_INT
 				);
 			}
+
+			if ($this->hasInput('filter_recent')) {
+				CProfile::update(self::PROFILE_IDX.'.filter_recent',
+					min(self::RECENT_MAX, max(self::RECENT_MIN, (int) $this->getInput('filter_recent'))), PROFILE_TYPE_INT
+				);
+			}
+
+			if ($this->hasInput('filter_long')) {
+				CProfile::update(self::PROFILE_IDX.'.filter_long',
+					min(self::LONG_MAX, max(self::LONG_MIN, (int) $this->getInput('filter_long'))), PROFILE_TYPE_INT
+				);
+			}
+
+			// A checkbox: sent by the filter form only when checked.
+			if ($this->hasInput('filter_service')) {
+				CProfile::update(self::PROFILE_IDX.'.filter_resolved', (int) $this->getInput('filter_resolved', 0),
+					PROFILE_TYPE_INT
+				);
+			}
 		}
 		elseif ($this->hasInput('filter_rst')) {
 			CProfile::delete(self::PROFILE_IDX.'.filter_service');
 			CProfile::delete(self::PROFILE_IDX.'.filter_sort');
 			CProfile::delete(self::PROFILE_IDX.'.filter_apdex');
+			CProfile::delete(self::PROFILE_IDX.'.filter_recent');
+			CProfile::delete(self::PROFILE_IDX.'.filter_long');
+			CProfile::delete(self::PROFILE_IDX.'.filter_resolved');
 		}
 
 		// The applications are listed here only, the real-time refresh (apm.overview.data) reads the stored one.
@@ -105,7 +141,7 @@ class Overview extends CController {
 			CProfile::update(self::PROFILE_IDX.'.filter_app', $application, PROFILE_TYPE_STR);
 		}
 
-		$filter = self::getFilter($this->getInput('endpoint_service', ''));
+		$filter = self::getFilter($this->getInput('endpoint_service', ''), $this->getInput('service', ''));
 		$filter['application'] = $application;
 
 		$timeselector_options = [
@@ -124,6 +160,11 @@ class Overview extends CController {
 
 		if ($filter['endpoint_service'] !== '') {
 			$data_url->setArgument('endpoint_service', $filter['endpoint_service']);
+		}
+
+		// The service picked on the map travels in the URL: it belongs to this page view, not to the profile.
+		if ($filter['focus'] !== '') {
+			$data_url->setArgument('service', $filter['focus']);
 		}
 
 		// Suggestions of the service filter; the page works without them.
@@ -147,22 +188,33 @@ class Overview extends CController {
 			'selected_tab' => $this->hasInput('tab')
 				? (int) array_search($this->getInput('tab'), OverviewHtml::TABS)
 				: null,
-			'data_url' => $data_url->getUrl()
+			'data_url' => $data_url->getUrl(),
+			// A fixed period does not move: there is nothing new to load.
+			'live' => str_starts_with((string) $timeselector['to'], 'now')
 		]);
 		$response->setTitle(I18n::t('APM overview'));
 		$this->setResponse($response);
 	}
 
 	/**
-	 * Page filter stored in the user profile, plus the exact service of the Endpoints tab. "application" is null until
-	 * the page has resolved one (no applications with data).
+	 * Page filter stored in the user profile, plus what travels in the URL: the exact service of the Endpoints tab and
+	 * the service picked on the map or in a table ("focus"), which replaces the stored service filter for that page
+	 * view without changing it. "application" is null until the page has resolved one (no applications with data).
 	 */
-	public static function getFilter(string $endpoint_service): array {
+	public static function getFilter(string $endpoint_service, string $focus = ''): array {
+		$stored = CProfile::get(self::PROFILE_IDX.'.filter_service', '');
+		$focus = trim($focus);
+
 		return [
 			'application' => CProfile::get(self::PROFILE_IDX.'.filter_app'),
-			'service' => CProfile::get(self::PROFILE_IDX.'.filter_service', ''),
+			'service' => $focus !== '' ? ApmStats::EXACT_PREFIX.$focus : $stored,
+			'stored_service' => $stored,
+			'focus' => $focus,
 			'sort' => CProfile::get(self::PROFILE_IDX.'.filter_sort', ApmStats::SORT_REQUESTS),
 			'apdex_ms' => (int) CProfile::get(self::PROFILE_IDX.'.filter_apdex', self::APDEX_DEFAULT),
+			'recent_min' => (int) CProfile::get(self::PROFILE_IDX.'.filter_recent', self::RECENT_DEFAULT),
+			'long_s' => (int) CProfile::get(self::PROFILE_IDX.'.filter_long', self::LONG_DEFAULT),
+			'resolved' => (bool) CProfile::get(self::PROFILE_IDX.'.filter_resolved', 1),
 			'endpoint_service' => $endpoint_service
 		];
 	}
