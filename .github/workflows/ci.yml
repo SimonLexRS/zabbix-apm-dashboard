@@ -44,9 +44,12 @@ jobs:
       - name: Install script
         run: |
           sh -n scripts/install.sh
+          bash -n scripts/setup.sh
+          shellcheck -S warning scripts/setup.sh
           mkdir -p /tmp/zbx/ui/include /tmp/zbx/ui/modules
           touch /tmp/zbx/ui/zabbix.php
           echo "define('ZABBIX_VERSION', '8.0.0');" > /tmp/zbx/ui/include/defines.inc.php
+          test "$(ZABBIX_UI=/tmp/zbx/ui sh scripts/install.sh --where)" = /tmp/zbx/ui
           sudo env ZABBIX_UI=/tmp/zbx/ui sh scripts/install.sh
           test -f /tmp/zbx/ui/modules/ApmOverview/manifest.json
           test -f /tmp/zbx/ui/modules/ApmServiceMap/manifest.json

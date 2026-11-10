@@ -3,6 +3,7 @@
 #
 #   sudo ./scripts/install.sh                  # install / upgrade
 #   sudo ./scripts/install.sh --uninstall      # remove the module folders
+#   ./scripts/install.sh --where               # only print the frontend directory it would use
 #   ZABBIX_UI=/path/to/ui sudo -E ./scripts/install.sh   # custom frontend directory
 #
 # Then: Administration -> General -> Modules -> Scan directory, and enable "APM Overview", "APM service health" and
@@ -37,6 +38,11 @@ fi
 if [ -z "${ZABBIX_UI:-}" ] || [ ! -f "$ZABBIX_UI/zabbix.php" ]; then
 	echo "Zabbix frontend not found; set ZABBIX_UI to the directory that contains zabbix.php." >&2
 	exit 1
+fi
+
+if [ "${1:-}" = "--where" ]; then
+	echo "$ZABBIX_UI"
+	exit 0
 fi
 
 if ! grep -q "ZABBIX_VERSION.*'8\." "$ZABBIX_UI/include/defines.inc.php" 2>/dev/null; then

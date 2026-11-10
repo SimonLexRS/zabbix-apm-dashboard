@@ -22,24 +22,18 @@ Modules, templates and guides that turn Zabbix 8.0 into an **application perform
 
 ## 🚀 Install it step by step
 
-> [!IMPORTANT]
-> ### [Open the guide: from Zabbix 8 to full APM on Ubuntu →](docs/ubuntu-step-by-step.md)
->
-> It starts from a server **with only Zabbix 8** and ends with everything working and real data. Its commands were run from start to finish, and it explains each problem that appeared and how it was solved. Also in [Spanish](docs/guia-ubuntu-paso-a-paso.md).
+On an Ubuntu or Debian server that already runs Zabbix 8:
 
-| Step | What you do | How you know it worked |
-|---|---|---|
-| **1. Base** | Prepare the server and download the repository | Terminal in the project folder |
-| **2. ClickHouse** | Install the trace store, with its own users | The `zabbix` database answers |
-| **3. Collector** | Install the OpenTelemetry Collector, verified and not exposed to the network | Ports only on `127.0.0.1` |
-| **4-5. Modules** | Install them and connect Zabbix to ClickHouse through the API | **APM → Overview** appears |
-| **6. Test** | Send sample traces | `all checks passed` |
-| **7-9. Store** | Deploy a real store of about 20 services in Docker | 23 containers and data in Zabbix |
-| **10. RUM** | Check what users experience in the browser | `all required checks passed` |
+```sh
+git clone https://github.com/SimonLexRS/zabbix-apm-dashboard.git && cd zabbix-apm-dashboard
+sudo ./scripts/setup.sh check            # checks the prerequisites, changes nothing
+sudo ./scripts/setup.sh install          # ClickHouse + Collector + modules + data source
+sudo ./scripts/setup.sh demo <IP>        # optional: test store of about 20 services
+```
 
-**You need:** Ubuntu with Zabbix 8.0, `sudo`, an API token of a Super admin, 10 GiB of RAM and 20 GB free. With 4 GiB you can reach APM, without the store.
+**You need:** `sudo`, an API token of a Super admin, 4 GiB of RAM and 5 GB free (10 GiB and 20 GB with the store).
 
-**Includes:** [17 real problems with their solution](docs/ubuntu-step-by-step.md#problems-that-appeared-and-how-they-were-solved) and a [final check](docs/ubuntu-step-by-step.md#to-check-everything-at-the-end).
+**[Step-by-step guide →](docs/ubuntu-step-by-step.md)** What each command does, what you must see and what to do if something fails.
 
 ## What you get
 

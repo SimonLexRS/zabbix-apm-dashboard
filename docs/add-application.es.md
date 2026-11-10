@@ -103,7 +103,7 @@ porcentaje de error, entradas de log por severidad y número de métricas recibi
 | Entradas Warning / Error / Fatal en logs | `{$LOG.SEVERITY.WARN}` (10), `{$LOG.SEVERITY.ERROR}` (5), `{$LOG.SEVERITY.FATAL}` (0) |
 
 Ajusta los macros en el host de cada aplicación. Para alertas por servicio y por endpoint añade
-**APM services by ClickHouse HTTP v2** ([installation.md](installation.md#6-template-alerts-and-history)) con
+**APM services by ClickHouse HTTP v2** ([installation.md](installation.es.md#5-template)) con
 `{$APM.SERVICE.MATCHES}` limitado a los servicios de la aplicación.
 
 Si la aplicación envía métricas de negocio (pedidos, reservas, pagos), añade `--kpi`: el host recibe además un ítem por

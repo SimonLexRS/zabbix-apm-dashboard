@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.4.0
+
+- **Installer** `scripts/setup.sh` for Ubuntu and Debian: `check` (prerequisites, changes nothing), `install`
+  (ClickHouse, Collector, modules, APM data source and a smoke test), `demo <IP>` (the OpenTelemetry Demo store in
+  Docker and its host), `verify`, `status` and `uninstall [--purge]`. Every command can be run again; it waits for each
+  service instead of sleeping, detects the frontend, the API address and the Docker bridge, and loads the Collector's
+  Docker configuration from a systemd drop-in, so the Collector no longer stops with Docker.
+- The step-by-step guide is now those commands, with the prerequisites in one table (it was 440 lines of commands).
+- `install.sh --where` prints the frontend directory it would use.
+
 ## 2.3.1
 
 - **Example applications** ([examples/demo-apps](examples/demo-apps/README.md)): the Go example, the store and the hotel

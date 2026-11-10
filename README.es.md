@@ -22,24 +22,18 @@ Módulos, plantillas y guías que convierten a Zabbix 8.0 en una plataforma de *
 
 ## 🚀 Instálalo paso a paso
 
-> [!IMPORTANT]
-> ### [Abrir la guía: de Zabbix 8 a APM completo en Ubuntu →](docs/guia-ubuntu-paso-a-paso.md)
->
-> Parte de un server **con solo Zabbix 8** y termina con todo funcionando y datos reales. Sus comandos se ejecutaron de principio a fin, y explica cada problema que apareció y cómo se resolvió. También en [inglés](docs/ubuntu-step-by-step.md).
+En un Ubuntu o Debian que ya tiene Zabbix 8:
 
-| Paso | Qué haces | Cómo sabes que funcionó |
-|---|---|---|
-| **1. Base** | Preparas el server y descargas el repositorio | Terminal en la carpeta del proyecto |
-| **2. ClickHouse** | Instalas el almacén de trazas, con usuarios propios | Responde la base `zabbix` |
-| **3. Collector** | Instalas OpenTelemetry Collector, verificado y sin exponerlo a la red | Puertos solo en `127.0.0.1` |
-| **4-5. Módulos** | Los instalas y conectas Zabbix con ClickHouse por API | Aparece **APM → Overview** |
-| **6. Prueba** | Envías trazas de prueba | `all checks passed` |
-| **7-9. Tienda** | Despliegas una tienda real de unos 20 servicios en Docker | 23 contenedores y datos en Zabbix |
-| **10. RUM** | Compruebas lo que viven los usuarios en el navegador | `all required checks passed` |
+```sh
+git clone https://github.com/SimonLexRS/zabbix-apm-dashboard.git && cd zabbix-apm-dashboard
+sudo ./scripts/setup.sh check            # comprueba los prerequisitos, no cambia nada
+sudo ./scripts/setup.sh install          # ClickHouse + Collector + módulos + fuente de datos
+sudo ./scripts/setup.sh demo <IP>        # opcional: tienda de prueba de unos 20 servicios
+```
 
-**Necesitas:** Ubuntu con Zabbix 8.0, `sudo`, un token de API de Super admin, 10 GiB de RAM y 20 GB libres. Con 4 GiB puedes llegar hasta APM, sin la tienda.
+**Necesitas:** `sudo`, un token de API de Super admin, 4 GiB de RAM y 5 GB libres (10 GiB y 20 GB con la tienda).
 
-**Incluye:** [17 problemas reales con su solución](docs/guia-ubuntu-paso-a-paso.md#problemas-que-aparecieron-y-cómo-se-resolvieron) y una [comprobación final](docs/guia-ubuntu-paso-a-paso.md#para-comprobar-todo-al-final).
+**[Guía paso a paso →](docs/guia-ubuntu-paso-a-paso.md)** Qué hace cada comando, qué debes ver y qué hacer si algo falla.
 
 ## Qué obtienes
 

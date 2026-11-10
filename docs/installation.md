@@ -2,7 +2,7 @@
 
 [Español](installation.es.md)
 
-> **On Ubuntu, follow the [step-by-step guide](ubuntu-step-by-step.md).** This page is a reference for other machine layouts.
+> **On Ubuntu or Debian, use the installer: [step-by-step guide](ubuntu-step-by-step.md)** (`sudo ./scripts/setup.sh install`). This page describes the same steps by hand, for other distributions or when ClickHouse and the Collector run on other machines.
 
 Once per Zabbix: storage, collector, data source, modules and template. Then each application is connected with
 [add-application.md](add-application.md). Every step ends with a check; do not go on until it passes.

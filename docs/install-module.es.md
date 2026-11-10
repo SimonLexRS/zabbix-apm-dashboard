@@ -2,7 +2,7 @@
 
 [English](install-module.md)
 
-> **En un server nuevo con Ubuntu, sigue la [guía paso a paso](guia-ubuntu-paso-a-paso.md).** Esta página solo cubre los módulos.
+> **En Ubuntu o Debian, `sudo ./scripts/setup.sh install` hace todo esto: [guía paso a paso](guia-ubuntu-paso-a-paso.md).** Esta página cubre solo los módulos, a mano.
 
 Guía para cualquier Linux con Zabbix 8.0: paquetes, compilación desde fuente o Docker.
 
