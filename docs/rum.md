@@ -127,6 +127,14 @@ Nothing is closed by hand: fix the cause and the group becomes *Resolved* by its
 
 Errors of the page itself need the error capture of the guide (**How it works**): `error` and `unhandledrejection` become failed spans. Failed requests need nothing.
 
+## Zabbix problems
+
+The page shows what fails; Zabbix is what tells you. The template [OpenTelemetry application by OTLP](apm-template.md)
+discovers the pages and the requests of the browser and opens a problem when a page raises errors or a request keeps
+failing, with the tag `service` = the browser service. Those problems, and the ones of the host of the application, are
+listed at the top of the **Errors** tab, each with a link to its event; the menu of the problem in **Monitoring →
+Problems** links back here. Notifications, acknowledgement, correlation and SLA are the ones of Zabbix.
+
 ## How to test
 
 ```mermaid

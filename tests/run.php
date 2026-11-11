@@ -564,6 +564,37 @@ namespace Modules\ApmOverview\Includes {
 		}
 	}
 
+	// Real user monitoring in the application template: discovered from all the traffic, problems tagged with the service.
+	$app_template = json_decode(file_get_contents(dirname(__DIR__).'/templates/otel_application_otlp.json'), true)
+		['zabbix_export']['templates'][0];
+	$browser_rules = array_column($app_template['discovery_rules'], null, 'key');
+	check('browser discovery rules', array_keys($browser_rules),
+		['otlp.browser.pages.discovery', 'otlp.browser.requests.discovery']
+	);
+	check('browser rules read all the traffic', array_column(array_column($browser_rules, 'master_item'), 'key'),
+		['otlp.browser.views.get', 'otlp.browser.requests.get']
+	);
+
+	foreach ($app_template['items'] as $item) {
+		if (strpos($item['key'], 'otlp.browser.') === 0) {
+			$conditions = array_column($item['query']['filter']['conditions'], 'value', 'attribute_key');
+			check($item['key'].' reads browser spans of the application', [
+				$conditions['telemetry.sdk.language'] ?? null, $conditions['service.namespace'] ?? null
+			], ['webjs', '{$OTLP.NAMESPACE}']);
+		}
+	}
+
+	foreach ($browser_rules as $rule) {
+		foreach ($rule['item_prototypes'] as $prototype) {
+			foreach ($prototype['trigger_prototypes'] ?? [] as $trigger) {
+				check($trigger['name'].': service tag', in_array(
+					['tag' => ZabbixProblems::TAG, 'value' => '{#SERVICE}'], $trigger['tags'], true
+				), true);
+				check($trigger['name'].': link', strpos($trigger['url'], 'action=apm.rum&tab=errors') !== false, true);
+			}
+		}
+	}
+
 	echo $failures === 0 ? "OK\n" : "$failures failure(s)\n";
 	exit($failures === 0 ? 0 : 1);
 }

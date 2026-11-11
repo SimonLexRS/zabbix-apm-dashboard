@@ -10,6 +10,9 @@ one host per application (macro set on the host) measures only that application.
   python3 scripts/build-otlp-app-template.py --namespace X   # fixed namespace, for Zabbix versions without macros in
                                                              # conditions: template "OpenTelemetry X by OTLP"
 
+It adds what the official template does not measure, the browser side (real user monitoring): page loads, errors of
+the page itself and failed requests, discovered per page and per request, with their triggers.
+
 It also makes the problems close by themselves: an interval without spans or log records is a 0 (not a discarded value
 or an unsupported item), "No spans received" tells that the application stopped sending, and every trigger links to the
 APM overview of the application.
@@ -46,6 +49,66 @@ NO_VALUE = '^No value$'
 # Module page of the application, opened from the trigger menu (user macros are resolved in trigger URLs).
 OVERVIEW_URL = 'zabbix.php?action=apm.overview&tab={tab}&filter_set=1&filter_app={app}'
 OVERVIEW_URL_NAME = 'APM overview'
+
+# Real user monitoring page of the module, on the Errors tab.
+RUM_URL = 'zabbix.php?action=apm.rum&tab=errors&filter_set=1&filter_app={app}'
+RUM_URL_NAME = 'APM real user monitoring'
+BROWSER_ERRORS_MACRO = '{$BROWSER.ERRORS.MAX}'
+BROWSER_FAILED_MACRO = '{$BROWSER.REQUESTS.FAILED.MAX}'
+# Spans sent from a browser by the OpenTelemetry web SDK (the same rule as the module: ApmStats::BROWSER).
+BROWSER_CONDITION = {'column': 'ResourceAttributes', 'attribute_key': 'telemetry.sdk.language', 'value': 'webjs'}
+# Paths kept per query: one item per path is discovered, so a page that puts free text in its URLs cannot flood Zabbix.
+BROWSER_PATH_LIMIT = 100
+
+# Browser spans grouped by service and URL, turned into one row per service, host and path: [{"service", "host",
+# "path", "count"}]. The path is the one the module shows (RumStats::PAGE_OF): query string dropped and the variable
+# segments replaced by ":id" (all digits; 6 or more letters, digits, "_" or "-" with a digit; a UUID), so /product/42
+# and /product/57 are one page. Only the newest bucket is read, as in the other items. Rows without a URL are left out,
+# and so are paths with a quote or a backslash (they cannot be written in the path of the dependent items).
+BROWSER_ROWS = (
+    'var rows = JSON.parse(value), newest = null, groups = {}, result = [], i, m, url, host, parts, path, key;\n'
+    'if (!Array.isArray(rows)) {\n'
+    '\tthrow \'Unexpected result: \' + value.substring(0, 200);\n'
+    '}\n'
+    'for (i = 0; i < rows.length; i++) {\n'
+    '\tif (newest === null || Number(rows[i].clock) > newest) {\n'
+    '\t\tnewest = Number(rows[i].clock);\n'
+    '\t}\n'
+    '}\n'
+    'for (i = 0; i < rows.length; i++) {\n'
+    '\turl = rows[i][\'SpanAttributes.url.full\'] || rows[i][\'SpanAttributes.http.url\'] || \'\';\n'
+    '\tif (url === \'\' || Number(rows[i].clock) !== newest || isNaN(Number(rows[i].count))) {\n'
+    '\t\tcontinue;\n'
+    '\t}\n'
+    '\tm = /^[a-z][a-z0-9+.-]*:\\/\\/([^\\/?#]*)([^?#]*)/i.exec(url);\n'
+    '\thost = m ? m[1] : \'\';\n'
+    '\tparts = (m ? m[2] : url.split(/[?#]/)[0]).split(\'/\');\n'
+    '\tpath = \'\';\n'
+    '\tfor (var j = 0; j < parts.length; j++) {\n'
+    '\t\tif (parts[j] === \'\') {\n'
+    '\t\t\tcontinue;\n'
+    '\t\t}\n'
+    '\t\tpath += \'/\' + (/^[0-9]+$/.test(parts[j])\n'
+    '\t\t\t|| (parts[j].length >= 6 && /^[A-Za-z0-9_-]+$/.test(parts[j]) && /[0-9]/.test(parts[j]))\n'
+    '\t\t\t|| /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(parts[j])\n'
+    '\t\t\t? \':id\' : parts[j]);\n'
+    '\t}\n'
+    '\tpath = path || \'/\';\n'
+    '\tif (/[\'"\\\\]/.test(host + path)) {\n'
+    '\t\tcontinue;\n'
+    '\t}\n'
+    '\tkey = rows[i].ServiceName + \'\\n\' + host + \'\\n\' + path;\n'
+    '\tif (!groups[key]) {\n'
+    '\t\tgroups[key] = {service: rows[i].ServiceName, host: host, path: path, count: 0};\n'
+    '\t\tresult.push(groups[key]);\n'
+    '\t}\n'
+    '\tgroups[key].count += Number(rows[i].count);\n'
+    '}\n'
+    'result.sort(function (a, b) {\n'
+    '\treturn b.count - a.count;\n'
+    '});\n'
+    'return JSON.stringify(result.slice(0, %d));'
+) % BROWSER_PATH_LIMIT
 
 # Zabbix 8.0.0rc3 returns Telemetry query results as rows, [{"clock":…,"count":55}], while the "$.columns.<alias>" paths
 # of the official template expect {"columns":{"count":55}}. Rows are turned into that shape; the other shape passes as is.
@@ -169,6 +232,161 @@ def no_spans_trigger(name: str, app: str) -> dict:
     }
 
 
+def browser_master(key: str, name: str, description: str, value: str, conditions: list, request: bool) -> dict:
+    """A Telemetry query on the browser spans of the application, grouped by service and URL (see BROWSER_ROWS)."""
+    columns = [{'column': 'ServiceName'}, {'column': 'SpanAttributes', 'attribute_key': 'url.full'}]
+
+    if request:
+        # Fetch and XMLHttpRequest spans of the older semantic conventions carry the URL in http.url.
+        columns.append({'column': 'SpanAttributes', 'attribute_key': 'http.url'})
+
+    return {
+        'uuid': 'browser/' + key,
+        'name': name,
+        'type': 'TELEMETRY_QUERY',
+        'key': key,
+        'delay': '{$OTLP.FREQUENCY:traces}',
+        'history': '0',
+        'value_type': 'JSON',
+        'description': description,
+        'preprocessing': [no_value_step('[]'), {'type': 'JAVASCRIPT', 'parameters': [BROWSER_ROWS]}],
+        'time_shift': '{$OTLP.TIMESHIFT:traces}',
+        'lookback_limit': '{$OTLP.LOOPBACK:traces}',
+        'granularity': '{$OTLP.GRANULARITY:traces}',
+        'query': {
+            'columns': columns,
+            'aggregated_columns': [{'alias': 'count'}],
+            'filter': {
+                'evaltype': 'AND',
+                'conditions': conditions + [
+                    BROWSER_CONDITION,
+                    {'column': 'ResourceAttributes', 'attribute_key': 'service.namespace', 'value': value}
+                ]
+            }
+        },
+        'tags': [{'tag': 'apm', 'value': 'traces'}, {'tag': 'component', 'value': 'raw'}]
+    }
+
+
+def browser_prototype(key: str, name: str, description: str, master: str, with_host: bool) -> dict:
+    """Count of one page or request, read from a master item; a minute without its row is 0, which closes problems."""
+    params = '"{#SERVICE}",' + ('"{#HOST}",' if with_host else '') + '"{#PATH}"'
+    path = "$[?(@.service=='{#SERVICE}'" + (" && @.host=='{#HOST}'" if with_host else '') + " && @.path=='{#PATH}')]"
+
+    return {
+        'uuid': 'browser/' + key,
+        'name': name,
+        'type': 'DEPENDENT',
+        'key': f'{key}[{params}]',
+        'description': description,
+        'preprocessing': [{
+            'type': 'JSONPATH',
+            'parameters': [path + '.count.first()'],
+            'error_handler': 'CUSTOM_VALUE',
+            'error_handler_params': '0'
+        }],
+        'master_item': {'key': master},
+        'tags': [{'tag': 'component', 'value': 'browser'}, {'tag': 'service', 'value': '{#SERVICE}'}]
+    }
+
+
+def browser_trigger(template: str, prototype: dict, macro: str, name: str, description: str, app: str) -> dict:
+    return {
+        'uuid': prototype['uuid'] + '/trigger',
+        # The threshold takes the path as context, so one page or request can have its own.
+        'expression': f'sum(/{template}/{prototype["key"]},5m)>{macro[:-1]}:"{{#PATH}}"}}',
+        'name': name,
+        'priority': 'AVERAGE',
+        'description': description,
+        'url': RUM_URL.format(app=app),
+        'url_name': RUM_URL_NAME,
+        # service = <service name>: the module shows the problem on that service and on Real user monitoring.
+        'tags': [{'tag': 'scope', 'value': 'availability'}, {'tag': 'service', 'value': '{#SERVICE}'}]
+    }
+
+
+def browser_monitoring(template: str, value: str, app: str) -> tuple:
+    """Real user monitoring: master items and discovery rules. Without browser spans the masters are empty and nothing
+    is discovered."""
+    span_kind_client = {'column': 'SpanKind', 'value': 'Client'}
+    failed = {'column': 'StatusCode', 'value': 'Error'}
+
+    masters = [
+        browser_master('otlp.browser.views.get', 'Browser: Get page loads',
+            'Page loads (documentLoad spans of the OpenTelemetry web SDK) per service and page.', value,
+            [{'column': 'SpanName', 'value': 'documentLoad'}], False),
+        browser_master('otlp.browser.errors.get', 'Browser: Get page errors',
+            'Errors of the page itself per service and page: failed browser spans that are not requests (uncaught '
+            'exceptions and rejected promises, sent as spans with status Error and the url.full attribute).', value,
+            [failed, {'column': 'SpanKind', 'value': 'Client', 'operator': 'NOT_EQUAL'}], False),
+        browser_master('otlp.browser.requests.get', 'Browser: Get requests',
+            'Requests made by the browser (fetch, XMLHttpRequest) per service, host and path.', value,
+            [span_kind_client], True),
+        browser_master('otlp.browser.requests.failed.get', 'Browser: Get failed requests',
+            'Failed requests made by the browser per service, host and path.', value,
+            [span_kind_client, failed], True)
+    ]
+
+    def rule(key: str, name: str, description: str, master: str, with_host: bool, prototypes: list) -> dict:
+        return {
+            'uuid': 'browser/' + key,
+            'name': name,
+            'type': 'DEPENDENT',
+            'key': key,
+            'description': description,
+            # A page without visits keeps its items (a problem can still close) and is removed after a week.
+            'lifetime': '7d',
+            'enabled_lifetime_type': 'DISABLE_NEVER',
+            'item_prototypes': prototypes,
+            'master_item': {'key': master},
+            'lld_macro_paths': [{'lld_macro': '{#SERVICE}', 'path': '$.service'}]
+                + ([{'lld_macro': '{#HOST}', 'path': '$.host'}] if with_host else [])
+                + [{'lld_macro': '{#PATH}', 'path': '$.path'}]
+        }
+
+    page_errors = browser_prototype('otlp.browser.page.errors', 'Browser {#SERVICE}: errors on {#PATH}',
+        'Errors of the page itself in the interval.', 'otlp.browser.errors.get', False)
+    page_errors['trigger_prototypes'] = [browser_trigger(template, page_errors, BROWSER_ERRORS_MACRO,
+        'Browser: errors on the page {#PATH} of {#SERVICE}',
+        f'The page raised more than {BROWSER_ERRORS_MACRO} errors (uncaught exceptions, rejected promises) in 5 '
+        'minutes in the browsers of its users. The link opens them, grouped, with the sessions affected.', app)]
+
+    request_failed = browser_prototype('otlp.browser.request.failed', 'Browser {#SERVICE}: failed requests to {#HOST}{#PATH}',
+        'Failed requests in the interval.', 'otlp.browser.requests.failed.get', True)
+    request_failed['trigger_prototypes'] = [browser_trigger(template, request_failed, BROWSER_FAILED_MACRO,
+        'Browser: requests to {#HOST}{#PATH} fail in {#SERVICE}',
+        f'More than {BROWSER_FAILED_MACRO} requests made by the browser failed in 5 minutes. The link opens the '
+        'requests that fail, with the trace down to the backend service that failed.', app)]
+
+    rules = [
+        rule('otlp.browser.pages.discovery', 'Browser: pages',
+            'Pages loaded in real browsers, from the page loads: every page has its error count, 0 until it fails.',
+            'otlp.browser.views.get', False, [
+                browser_prototype('otlp.browser.page.views', 'Browser {#SERVICE}: page loads of {#PATH}',
+                    'Page loads in the interval.', 'otlp.browser.views.get', False),
+                page_errors
+            ]),
+        rule('otlp.browser.requests.discovery', 'Browser: requests',
+            'Requests made by real browsers, from all of them: every request has its failed count, 0 until it fails.',
+            'otlp.browser.requests.get', True, [
+                browser_prototype('otlp.browser.request.count', 'Browser {#SERVICE}: requests to {#HOST}{#PATH}',
+                    'Requests in the interval.', 'otlp.browser.requests.get', True),
+                request_failed
+            ])
+    ]
+
+    macros = [
+        {'macro': BROWSER_ERRORS_MACRO, 'value': '2',
+            'description': 'Errors of a page in 5 minutes above which its problem opens. Context: the page, e.g. '
+                '{$BROWSER.ERRORS.MAX:"/checkout"}.'},
+        {'macro': BROWSER_FAILED_MACRO, 'value': '3',
+            'description': 'Failed browser requests to one path in 5 minutes above which its problem opens. Context: '
+                'the path, e.g. {$BROWSER.REQUESTS.FAILED.MAX:"/api/pay/:id"}.'}
+    ]
+
+    return masters, rules, macros
+
+
 def build(source: dict, namespace: str | None) -> dict:
     name = f'OpenTelemetry {namespace} by OTLP' if namespace else 'OpenTelemetry application by OTLP'
     value = namespace if namespace else NAMESPACE_MACRO
@@ -222,6 +440,11 @@ def build(source: dict, namespace: str | None) -> dict:
         if item['key'] == LOGS_MASTER:
             # No log records in the interval: an empty result, which the dependent items count as 0.
             item['preprocessing'] = [no_value_step('[]')] + item.get('preprocessing', [])
+
+    masters, rules, browser_macros = browser_monitoring(name, value, app)
+    template['items'] += masters
+    template.setdefault('discovery_rules', []).extend(rules)
+    template['macros'] += browser_macros
 
     template['macros'].append({
         'macro': NODATA_MACRO,

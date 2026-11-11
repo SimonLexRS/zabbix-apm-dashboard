@@ -65,6 +65,32 @@ macros accept a signal context: `{$OTLP.FREQUENCY:traces}`, `:logs`, `:metrics`,
 The template also brings a host dashboard (**Overview**: uptime, error %, duration by status, status distribution,
 metric amount, problems, log severities): **Monitoring → Hosts → apm-&lt;app&gt; → Dashboards**.
 
+## Real user monitoring: the browser
+
+The official template does not look at the browser. This one adds it, for applications whose pages send spans with the
+OpenTelemetry web SDK (`telemetry.sdk.language = webjs`, see [rum.md](rum.md)); without them nothing is discovered.
+
+| Discovery rule | Discovers | Items per row |
+|---|---|---|
+| Browser: pages | Service and page, from the page loads (`documentLoad`) | Page loads; errors of the page itself |
+| Browser: requests | Service, host and path, from the requests of the browser (fetch, XMLHttpRequest) | Requests; failed requests |
+
+| Trigger (Average) | Expression | Default |
+|---|---|---|
+| Browser: errors on the page *path* of *service* | `sum(errors, 5m)` > `{$BROWSER.ERRORS.MAX:"<path>"}` | 2 |
+| Browser: requests to *host/path* fail in *service* | `sum(failed requests, 5m)` > `{$BROWSER.REQUESTS.FAILED.MAX:"<path>"}` | 3 |
+
+- **Four Telemetry query items** read the browser spans grouped by service and URL (`url.full`, or `http.url` for
+  requests): page loads, page errors (failed spans that are not requests, the rule the module uses), requests and
+  failed requests. A JavaScript step turns the URLs into the pages the module shows: no query string, and the variable
+  segments as `:id` (`/product/42` and `/product/57` are one page). At most 100 paths per query are kept, the busiest.
+- Pages and requests are discovered **from all the traffic, not from the failures**: each has its count at 0 before it
+  fails, and a minute without failures is a 0, so the problems close by themselves.
+- Each trigger carries the tag **`service` = the browser service**, so the module shows the problem on that service
+  and on **Real user monitoring → Errors**, and a link, **APM real user monitoring**, in the menu of the problem.
+- The threshold takes the path as context: `{$BROWSER.ERRORS.MAX:"/checkout"}` = `0` opens on the first error there.
+- Items of a page without visits stay enabled and are removed after 7 days.
+
 ## Generation and Zabbix upgrades
 
 The template is generated, never edited by hand:
@@ -81,7 +107,8 @@ JavaScript step that turns row results (`[{"count":55}]`, 8.0.0rc3) into the `{"
 official paths read, taking the newest interval when a result brings several, and lets the other shape pass unchanged;
 makes "no rows" a 0 for counts and span durations (no value for uptime); adds up the log records of each severity range
 instead of reading its first row; rewrites the error percentage so that it cannot divide by zero; adds *No spans
-received*, `{$SPAN.NODATA}` and the trigger links; drops raw columns that group the aggregated column; and gives
+received*, `{$SPAN.NODATA}` and the trigger links; adds the browser items, discovery rules and
+triggers (real user monitoring); drops raw columns that group the aggregated column; and gives
 deterministic version 4 UUIDs. The CI fails if the committed template is not the generated one (`--check`).
 
 After upgrading Zabbix, export the official template again (**Data collection → Templates →** select

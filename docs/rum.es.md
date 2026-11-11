@@ -127,6 +127,14 @@ Nada se cierra a mano: corrige la causa y el grupo pasa a *Resuelto* solo.
 
 Los errores de la propia página necesitan la captura de errores de la guía (**Cómo funciona**): `error` y `unhandledrejection` se convierten en spans fallidos. Las peticiones fallidas no necesitan nada.
 
+## Problemas de Zabbix
+
+La página muestra qué falla; quien avisa es Zabbix. El template [OpenTelemetry application by OTLP](apm-template.es.md)
+descubre las páginas y las peticiones del navegador y abre un problema cuando una página da errores o una petición sigue
+fallando, con el tag `service` = el servicio del navegador. Esos problemas, y los del host de la aplicación, aparecen
+arriba en la pestaña **Errores**, cada uno con un enlace a su evento; el menú del problema en **Monitoring → Problems**
+enlaza de vuelta aquí. Las notificaciones, el reconocimiento, la correlación y el SLA son los de Zabbix.
+
 ## Cómo hacer testing
 
 ```mermaid

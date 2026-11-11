@@ -191,12 +191,15 @@ class ServiceHtml {
 
 	/**
 	 * Open Zabbix problems: of the service, of the host of its application and of the hosts it runs on.
+	 *
+	 * @param string|null $service_title  Title of the problems tagged with the service, when they are not those of
+	 *                                    one service (Real user monitoring: every browser service of the application).
 	 */
-	public static function problems(array $problems): ?CDiv {
+	public static function problems(array $problems, ?string $service_title = null): ?CDiv {
 		$groups = [];
 
 		if ($problems['service']['count'] > 0) {
-			$groups[] = [I18n::t('Problems of this service (tag service)'), $problems['service'], null];
+			$groups[] = [$service_title ?? I18n::t('Problems of this service (tag service)'), $problems['service'], null];
 		}
 
 		if ($problems['application'] !== null && $problems['application']['problems']['count'] > 0) {
