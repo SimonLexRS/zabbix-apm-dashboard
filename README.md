@@ -87,7 +87,9 @@ python3 scripts/verify-app.py shop              # all checks passed
 | Install only the modules | [Modules](docs/install-module.md) |
 | Connect my application | [Add an application](docs/add-application.md) and [examples per stack](#examples-per-stack) |
 | See it with example applications (Go API, store, hotels) | [Example applications](examples/demo-apps/README.md), in Docker |
+| Provoke failures by hand and see them in Zabbix (slow database, failed purchases, a service down) | [Fault Shop](examples/stacks/fault-shop/README.md): `sudo ./scripts/setup.sh shop <IP>` |
 | Monitor my users' browsers | [RUM: implementation and testing](docs/rum.md) |
+| See one service in depth, its versions and its Zabbix problems | [Service map and service pages](docs/services.md) |
 | Follow sales, reservations or any business number | [Business KPIs](docs/business-kpis.md) |
 
 Lab, without installing anything in your Zabbix:
@@ -147,6 +149,7 @@ The service filter takes a substring (`checkout`), a wildcard (`demo-*`) or an e
 - [Go](examples/stacks/go/README.md), runnable
 - [Java, Python, Node.js, .NET and Kubernetes](examples/stacks/zero-code/README.md), without changing code
 - [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.md): a store of about 20 services in 10 languages
+- [**Fault Shop**](examples/stacks/fault-shop/README.md): a small store (Python, Node.js, PostgreSQL, Redis, browser) with a panel of switches that break it on demand, and how its data reaches ClickHouse and Zabbix
 
 ## What was tested
 
@@ -169,8 +172,10 @@ The service filter takes a substring (`checkout`), a wildcard (`demo-*`) or an e
 |---|---|
 | [Add an application](docs/add-application.md) | Instrument, reach the Collector, create the host and verify |
 | [Real user monitoring](docs/rum.md) | How it works, how to implement it and how to test it |
+| [Service map, service pages, versions](docs/services.md) | How to read the map, link Zabbix problems to a service, and use versions and deployments |
 | [Business KPIs](docs/business-kpis.md) | Orders, reservations or payments as Zabbix items, by attribute, for dashboards and the assistant |
 | [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.md) | The test store, with its problems and solutions |
+| [Fault Shop](examples/stacks/fault-shop/README.md) | A store you break by hand: every fault, where it shows in Zabbix, and the path of its data to ClickHouse |
 
 | Reference | |
 |---|---|

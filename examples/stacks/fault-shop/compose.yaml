@@ -1,0 +1,153 @@
+# Fault Shop: a small store whose failures you switch on and off by hand, sending OpenTelemetry to the Collector of
+# Zabbix APM on this host (see README.md).
+#
+#   docker compose up -d --build       # store and fault panel on http://<this server>:18090/
+#
+# Browser -> web (nginx) -> shop -> catalog -> PostgreSQL
+#                                -> checkout -> catalog, payment -> bank (not instrumented), PostgreSQL
+#                                            -> Redis queue "orders" -> notifier
+#
+# The containers reach the Collector at host.docker.internal, the docker0 address of the host (172.17.0.1), where it
+# listens with examples/stacks/opentelemetry-demo/otelcol-docker-bridge.yaml. Only "web" is published.
+
+x-service: &service
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  restart: unless-stopped
+  logging:
+    options:
+      max-size: 10m
+      max-file: "3"
+
+x-otel: &otel
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://${ZABBIX_APM_HOST:-host.docker.internal}:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: otlp
+  OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: "true"
+  OTEL_NODE_ENABLED_INSTRUMENTATIONS: http,express,pg,undici
+  OTEL_NODE_RESOURCE_DETECTORS: env,host
+  FAULTS_FILE: /faults/faults.json
+
+services:
+  web:
+    <<: *service
+    image: nginx:1.29-alpine
+    ports:
+      - "${SHOP_PORT:-18090}:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [shop]
+
+  shop:
+    <<: *service
+    build: ./python
+    command: opentelemetry-instrument waitress-serve --port 8000 --threads 16 shop:app
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: shop
+      # The panel reads its switches every few seconds: not part of the store.
+      OTEL_PYTHON_FLASK_EXCLUDED_URLS: faults
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=fault-shop,service.version=1.0.0
+    volumes: [faults:/faults]
+    depends_on: [redis, catalog, checkout]
+
+  catalog:
+    <<: *service
+    build: ./node
+    command: node --require @opentelemetry/auto-instrumentations-node/register catalog.js
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: catalog
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=fault-shop,service.version=1.0.0
+      PGHOST: postgres
+      PGUSER: shop
+      PGPASSWORD: shop
+      PGDATABASE: shop
+    volumes: [faults:/faults:ro]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  checkout:
+    <<: *service
+    build: ./python
+    command: opentelemetry-instrument waitress-serve --port 8000 --threads 16 checkout:app
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: checkout
+      # A second release with a defect: CHECKOUT_VERSION=1.1.0 docker compose up -d checkout
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=fault-shop,service.version=${CHECKOUT_VERSION:-1.0.0}
+      APP_VERSION: ${CHECKOUT_VERSION:-1.0.0}
+      DATABASE_URL: postgresql://shop:shop@postgres/shop
+    volumes: [faults:/faults:ro]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment:
+    <<: *service
+    build: ./node
+    command: node --require @opentelemetry/auto-instrumentations-node/register payment.js
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: payment
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=fault-shop,service.version=1.0.0
+    volumes: [faults:/faults:ro]
+
+  notifier:
+    <<: *service
+    build: ./python
+    command: opentelemetry-instrument python notifier.py
+    environment:
+      <<: *otel
+      OTEL_SERVICE_NAME: notifier
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=fault-shop,service.version=1.0.0
+      # The worker polls the queue all the time: only the orders it processes become spans.
+      OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: redis
+    volumes: [faults:/faults:ro]
+    depends_on: [redis]
+
+  # The card issuer: someone else's service, so it sends no telemetry and shows on the map as an external host.
+  bank:
+    <<: *service
+    build: ./python
+    command: python bank.py
+    environment:
+      FAULTS_FILE: /faults/faults.json
+    volumes: [faults:/faults:ro]
+
+  # Simulated customers, through the same nginx as the browser. Its rate is one of the switches of the panel.
+  loadgen:
+    <<: *service
+    build: ./python
+    command: python loadgen.py
+    environment:
+      FAULTS_FILE: /faults/faults.json
+      SHOP_URL: http://web
+    volumes: [faults:/faults:ro]
+    depends_on: [web]
+
+  # Reachable only from this compose network; the password protects nothing and is not a secret.
+  postgres:
+    <<: *service
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U shop]
+      interval: 3s
+      retries: 20
+
+  redis:
+    <<: *service
+    image: redis:8-alpine
+    command: redis-server --save "" --appendonly no
+
+volumes:
+  faults:

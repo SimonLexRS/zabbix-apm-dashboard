@@ -87,7 +87,9 @@ python3 scripts/verify-app.py shop              # all checks passed
 | Instalar solo los módulos | [Módulos](docs/install-module.es.md) |
 | Conectar mi aplicación | [Agregar una aplicación](docs/add-application.es.md) y [ejemplos por stack](#ejemplos-por-stack) |
 | Verlo con aplicaciones de ejemplo (API en Go, tienda, hoteles) | [Aplicaciones de ejemplo](examples/demo-apps/README.es.md), en Docker |
+| Provocar fallos a mano y verlos en Zabbix (base de datos lenta, compras fallidas, un servicio caído) | [Fault Shop](examples/stacks/fault-shop/README.es.md): `sudo ./scripts/setup.sh shop <IP>` |
 | Monitorear los navegadores de mis usuarios | [RUM: implementación y testing](docs/rum.es.md) |
+| Ver un servicio a fondo, sus versiones y sus problemas de Zabbix | [Mapa de servicios y páginas de servicio](docs/services.es.md) |
 | Seguir ventas, reservas o cualquier número del negocio | [KPIs de negocio](docs/business-kpis.es.md) |
 
 Laboratorio, sin instalar nada en tu Zabbix:
@@ -147,6 +149,7 @@ El filtro de servicio acepta un texto contenido (`checkout`), un comodín (`demo
 - [Go](examples/stacks/go/README.es.md), ejecutable
 - [Java, Python, Node.js, .NET y Kubernetes](examples/stacks/zero-code/README.es.md), sin cambiar código
 - [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.es.md): tienda de unos 20 servicios en 10 lenguajes
+- [**Fault Shop**](examples/stacks/fault-shop/README.es.md): una tienda pequeña (Python, Node.js, PostgreSQL, Redis, navegador) con un panel de interruptores que la rompen a voluntad, y cómo llegan sus datos a ClickHouse y a Zabbix
 
 ## Qué se comprobó
 
@@ -169,8 +172,10 @@ El filtro de servicio acepta un texto contenido (`checkout`), un comodín (`demo
 |---|---|
 | [Agregar una aplicación](docs/add-application.es.md) | Instrumentar, llegar al Collector, crear el host y verificar |
 | [Monitoreo de usuarios reales](docs/rum.es.md) | Cómo funciona, cómo se implementa y cómo hacer testing |
+| [Mapa de servicios, páginas de servicio, versiones](docs/services.es.md) | Cómo leer el mapa, enlazar problemas de Zabbix a un servicio y usar versiones y despliegues |
 | [KPIs de negocio](docs/business-kpis.es.md) | Pedidos, reservas o pagos como ítems de Zabbix, por atributo, para dashboards y el asistente |
 | [OpenTelemetry Demo](examples/stacks/opentelemetry-demo/README.es.md) | La tienda de prueba, con sus problemas y soluciones |
+| [Fault Shop](examples/stacks/fault-shop/README.es.md) | Una tienda que rompes a mano: cada fallo, dónde se ve en Zabbix y el camino de sus datos hasta ClickHouse |
 
 | Referencia | |
 |---|---|

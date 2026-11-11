@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product · Fault Shop</title>
+<link rel="stylesheet" href="shop.css">
+</head>
+<body>
+<header></header>
+<main>
+	<p><a href="/">← All products</a></p>
+	<p id="notice" class="notice"></p>
+	<div id="product" class="card" hidden>
+		<span class="category"></span>
+		<h1 class="name"></h1>
+		<span class="price"></span>
+		<span class="muted stock"></span>
+		<p><button type="button">Add to cart</button></p>
+	</div>
+</main>
+<script type="module">
+	import { api, addToCart, money, notice } from './shop.js';
+
+	const id = Number(new URLSearchParams(location.search).get('id'));
+	const card = document.getElementById('product');
+
+	try {
+		const product = await api('/products/' + id);
+
+		document.title = product.name + ' · Fault Shop';
+		card.querySelector('.category').textContent = product.category;
+		card.querySelector('.name').textContent = product.name;
+		card.querySelector('.price').textContent = money(product.price);
+		card.querySelector('.stock').textContent = product.stock + ' in stock';
+		card.querySelector('button').addEventListener('click', () => addToCart(product.id));
+		card.hidden = false;
+	}
+	catch (error) {
+		notice('This product could not be loaded. ' + error.message, 'error');
+	}
+</script>
+</body>
+</html>

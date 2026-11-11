@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cart · Fault Shop</title>
+<link rel="stylesheet" href="shop.css">
+</head>
+<body>
+<header></header>
+<main>
+	<h1>Cart</h1>
+	<p id="notice" class="notice"></p>
+	<table id="cart" hidden>
+		<thead><tr><th>Product</th><th class="number">Quantity</th><th class="number">Price</th><th class="number">Subtotal</th></tr></thead>
+		<tbody></tbody>
+		<tfoot><tr><th colspan="3">Total</th><th class="number" id="total"></th></tr></tfoot>
+	</table>
+	<form id="pay" hidden>
+		<h2>Pay</h2>
+		<p>
+			<label>Test card
+				<select name="card">
+					<option value="4242424242424242">Visa ···· 4242</option>
+					<option value="5555555555554444">Mastercard ···· 4444</option>
+					<option value="378282246310005">Amex ···· 0005</option>
+				</select>
+			</label>
+			<button type="submit">Place order</button>
+			<button type="button" class="plain" id="empty">Empty cart</button>
+		</p>
+		<p class="muted">Nothing is charged: the cards are test numbers and the bank is simulated.</p>
+	</form>
+</main>
+<script type="module">
+	import { api, cartId, money, notice, showCartCount } from './shop.js';
+
+	const table = document.getElementById('cart');
+	const form = document.getElementById('pay');
+
+	async function show() {
+		const [cart, products] = await Promise.all([api('/cart/' + cartId), api('/products')]);
+		const rows = Object.entries(cart.items);
+		let total = 0;
+
+		showCartCount(cart.items);
+		table.hidden = form.hidden = rows.length === 0;
+		table.tBodies[0].replaceChildren();
+
+		for (const [id, quantity] of rows) {
+			const product = products.find((candidate) => candidate.id === Number(id));
+			const row = table.tBodies[0].insertRow();
+
+			row.insertCell().textContent = product.name;
+			row.insertCell().textContent = quantity;
+			row.insertCell().textContent = money(product.price);
+			row.insertCell().textContent = money(product.price * quantity);
+			[1, 2, 3].forEach((cell) => row.cells[cell].className = 'number');
+			total += product.price * quantity;
+		}
+
+		document.getElementById('total').textContent = money(total);
+
+		return rows.length;
+	}
+
+	form.addEventListener('submit', async (event) => {
+		event.preventDefault();
+
+		const button = form.querySelector('[type=submit]');
+
+		button.disabled = true;
+		notice('Placing the order…');
+
+		try {
+			const order = await api('/checkout/' + cartId, { method: 'POST', body: { card: form.card.value } });
+
+			await show();
+			notice(`Order ${order.order_id} placed: ${money(order.total)}.`, 'ok');
+		}
+		catch (error) {
+			notice('The order was not placed. ' + error.message, 'error');
+		}
+
+		button.disabled = false;
+	});
+
+	document.getElementById('empty').addEventListener('click', async () => {
+		await api('/cart/' + cartId, { method: 'DELETE' });
+		await show();
+		notice('The cart is empty.');
+	});
+
+	try {
+		if (await show() === 0) {
+			notice('The cart is empty. Add something from the product list.');
+		}
+	}
+	catch (error) {
+		notice('The cart could not be loaded. ' + error.message, 'error');
+	}
+</script>
+</body>
+</html>

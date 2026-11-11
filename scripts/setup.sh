@@ -6,6 +6,7 @@
 #   sudo ./scripts/setup.sh install            # ClickHouse + Collector + modules + data source + smoke test
 #   sudo ./scripts/setup.sh demo [IP]          # test store in Docker; IP = address you open it with in the browser
 #   sudo ./scripts/setup.sh demo stop          # stop the test store (start it again with demo [IP])
+#   sudo ./scripts/setup.sh shop [IP|stop]     # Fault Shop: a small store whose failures you switch on by hand
 #   sudo ./scripts/setup.sh verify [namespace] # compare Zabbix with ClickHouse (default: opentelemetry-demo)
 #   sudo ./scripts/setup.sh status
 #   sudo ./scripts/setup.sh uninstall [--purge] [--yes]   # --purge also removes ClickHouse and ALL its data
@@ -17,6 +18,7 @@
 #   CH_ADMIN_USER, CH_ADMIN_PASSWORD   admin of an existing ClickHouse (default: user "default", no password)
 #   OTELCOL_VERSION    otelcol-contrib release to install (default below)
 #   DEMO_DIR, DEMO_PORT, DEMO_REPO     test store (default: /opt/opentelemetry-demo, 18080)
+#   SHOP_PORT          port of the Fault Shop (default: 18090)
 set -euo pipefail
 
 OTELCOL_VERSION="${OTELCOL_VERSION:-0.164.0}"
@@ -24,6 +26,8 @@ DEMO_DIR="${DEMO_DIR:-/opt/opentelemetry-demo}"
 DEMO_PORT="${DEMO_PORT:-18080}"
 DEMO_REPO="${DEMO_REPO:-https://github.com/SimonLexRS/opentelemetry-demo.git}"
 DEMO_NAMESPACE=opentelemetry-demo
+SHOP_PORT="${SHOP_PORT:-18090}"
+SHOP_NAMESPACE=fault-shop
 MODULE_IDS="apmoverview apmservicehealth apmservicemap"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -393,42 +397,11 @@ install_all() {
 
 # --- demo -------------------------------------------------------------------------------------------------------------
 
-compose() {
-	(cd "$DEMO_DIR" && docker compose -f compose.yaml -f compose.full.yaml -f compose.zabbix-lite.yaml \
-		--env-file .env --env-file .env.override --env-file .env.zabbix "$@")
-}
-
-demo_http_ok() { [ "$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$DEMO_PORT/")" = 200 ]; }
-
-demo() {
-	local public_ip="${1:-}" bridge_ip mem attempt
-
-	if [ "$public_ip" = stop ]; then
-		[ -f "$DEMO_DIR/.env.zabbix" ] || die 'The test store is not installed.'
-		compose stop >/dev/null 2>&1
-		ok 'Test store stopped. Start it again with: sudo ./scripts/setup.sh demo <IP>'
-		return 0
-	fi
-
-	load_state
-	[ -s "$STATE/ch_reader" ] && systemctl is-active -q otelcol-contrib || die 'Run first: sudo ./scripts/setup.sh install'
-	find_api && [ -n "${ZABBIX_API_TOKEN:-}" ] || die 'Zabbix API or token not available. Run: sudo ./scripts/setup.sh check'
-
-	step 'Test store: prerequisites'
-
-	mem="$(mem_mib)"
-	if [ "$mem" -lt 9000 ] && [ -z "${DEMO_FORCE:-}" ]; then
-		die "RAM: $mem MiB. The store needs a server with about 10 GiB. Connect your own application instead: docs/add-application.md (or force with DEMO_FORCE=1)."
-	fi
-
-	if [ -z "$public_ip" ]; then
-		public_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
-		[ -n "$public_ip" ] || die 'Give the address you open this server with: sudo ./scripts/setup.sh demo <IP>'
-		warn "Using $public_ip as the address of the store. If you browse to another one: sudo ./scripts/setup.sh demo <IP>"
-	fi
+# Docker, and the Collector listening on its bridge too: where the containers of a test store send their telemetry.
+docker_bridge() {
+	local bridge_ip
 
 	docker compose version >/dev/null 2>&1 || install_packages docker.io docker-compose-v2
-	install_packages git
 	systemctl enable -q --now docker 2>/dev/null
 	wait_for 60 ip -4 address show docker0 || die 'Docker did not create its bridge (docker0). Log: sudo journalctl -u docker -n 30 --no-pager'
 	bridge_ip="$(ip -4 -o address show docker0 | awk '{print $4}' | cut -d/ -f1)"
@@ -465,6 +438,44 @@ EOF
 		die 'The Collector did not open its ports (log above).'
 	fi
 	ok "Collector listens on 127.0.0.1 and $bridge_ip only"
+}
+
+compose() {
+	(cd "$DEMO_DIR" && docker compose -f compose.yaml -f compose.full.yaml -f compose.zabbix-lite.yaml \
+		--env-file .env --env-file .env.override --env-file .env.zabbix "$@")
+}
+
+demo_http_ok() { [ "$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$DEMO_PORT/")" = 200 ]; }
+
+demo() {
+	local public_ip="${1:-}" mem attempt
+
+	if [ "$public_ip" = stop ]; then
+		[ -f "$DEMO_DIR/.env.zabbix" ] || die 'The test store is not installed.'
+		compose stop >/dev/null 2>&1
+		ok 'Test store stopped. Start it again with: sudo ./scripts/setup.sh demo <IP>'
+		return 0
+	fi
+
+	load_state
+	[ -s "$STATE/ch_reader" ] && systemctl is-active -q otelcol-contrib || die 'Run first: sudo ./scripts/setup.sh install'
+	find_api && [ -n "${ZABBIX_API_TOKEN:-}" ] || die 'Zabbix API or token not available. Run: sudo ./scripts/setup.sh check'
+
+	step 'Test store: prerequisites'
+
+	mem="$(mem_mib)"
+	if [ "$mem" -lt 9000 ] && [ -z "${DEMO_FORCE:-}" ]; then
+		die "RAM: $mem MiB. The store needs a server with about 10 GiB. Connect your own application instead: docs/add-application.md (or force with DEMO_FORCE=1)."
+	fi
+
+	if [ -z "$public_ip" ]; then
+		public_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
+		[ -n "$public_ip" ] || die 'Give the address you open this server with: sudo ./scripts/setup.sh demo <IP>'
+		warn "Using $public_ip as the address of the store. If you browse to another one: sudo ./scripts/setup.sh demo <IP>"
+	fi
+
+	install_packages git
+	docker_bridge
 
 	step 'Test store (OpenTelemetry Demo)'
 
@@ -504,6 +515,53 @@ EOF
 	printf '\nOpen Zabbix -> APM -> Overview -> %s (the service map fills in within a minute).\n' "$DEMO_NAMESPACE"
 	printf 'Browse the store at http://%s:%s/ and look at APM -> Real user monitoring.\n' "$public_ip" "$DEMO_PORT"
 	printf 'In 10 minutes, compare Zabbix with ClickHouse: sudo ./scripts/setup.sh verify\n'
+}
+
+# --- shop -------------------------------------------------------------------------------------------------------------
+
+shop_compose() { docker compose -p "$SHOP_NAMESPACE" -f "$REPO/examples/stacks/fault-shop/compose.yaml" "$@"; }
+shop_installed() { command -v docker >/dev/null && [ -n "$(shop_compose ps -aq 2>/dev/null)" ]; }
+shop_http_ok() { [ "$(curl -s -m 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SHOP_PORT/api/products")" = 200 ]; }
+
+shop() {
+	local address="${1:-}"
+
+	if [ "$address" = stop ]; then
+		shop_installed || die 'The Fault Shop is not installed.'
+		shop_compose stop >/dev/null 2>&1
+		ok 'Fault Shop stopped. Start it again with: sudo ./scripts/setup.sh shop'
+		return 0
+	fi
+
+	load_state
+	[ -s "$STATE/ch_reader" ] && systemctl is-active -q otelcol-contrib || die 'Run first: sudo ./scripts/setup.sh install'
+	find_api && [ -n "${ZABBIX_API_TOKEN:-}" ] || die 'Zabbix API or token not available. Run: sudo ./scripts/setup.sh check'
+
+	step 'Fault Shop: prerequisites'
+	docker_bridge
+
+	step 'Fault Shop'
+
+	echo '  Building the images (2 to 5 minutes the first time)...'
+	SHOP_PORT="$SHOP_PORT" shop_compose up -d --build --quiet-pull >"$TMP/shop-up" 2>&1 \
+		|| { tail -15 "$TMP/shop-up" >&2; die 'docker compose up failed (error above).'; }
+	ok "$(shop_compose ps -q | wc -l) containers started"
+
+	wait_for 120 shop_http_ok || die "The shop does not answer on port $SHOP_PORT. See: sudo docker ps -a"
+	[ -n "$address" ] || address="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
+	ok "Store: http://${address:-<this server>}:$SHOP_PORT/"
+
+	step 'Application in Zabbix'
+
+	ZABBIX_URL="$ZABBIX_URL" ZABBIX_API_TOKEN="$ZABBIX_API_TOKEN" \
+		python3 "$REPO/scripts/zabbix-apm-app.py" add "$SHOP_NAMESPACE" --name 'Fault Shop' --timeshift 60s | sed 's/^/  /'
+
+	wait_for 120 ch_has_rows "SELECT count() FROM zabbix.otel_traces WHERE ResourceAttributes['service.namespace'] = '$SHOP_NAMESPACE' AND Timestamp > now() - INTERVAL 5 MINUTE" \
+		|| die 'No traces from the shop in ClickHouse yet. Logs: sudo docker logs fault-shop-shop-1 --tail 30 ; sudo journalctl -u otelcol-contrib -n 30 --no-pager'
+	ok 'Traces from the shop are arriving in ClickHouse'
+
+	printf '\nFault panel: http://%s:%s/faults.html  (switch a failure on, then look at it in Zabbix)\n' "${address:-<this server>}" "$SHOP_PORT"
+	printf 'Open Zabbix -> APM -> Overview -> %s. Guide: examples/stacks/fault-shop/README.md\n' "$SHOP_NAMESPACE"
 }
 
 # --- verify / status --------------------------------------------------------------------------------------------------
@@ -558,6 +616,10 @@ print(sum(1 for m in json.load(sys.stdin) if m['id'] in wanted and str(m['status
 		if demo_http_ok; then ok "Test store: http://$(sed -n 's/^DEMO_PUBLIC_HOST=//p' "$DEMO_DIR/.env.zabbix"):$DEMO_PORT/"; else bad "Test store: no answer on port $DEMO_PORT"; fi
 	fi
 
+	if shop_installed; then
+		if shop_http_ok; then ok "Fault Shop: port $SHOP_PORT, panel at /faults.html"; else bad "Fault Shop: no answer on port $SHOP_PORT (stopped? sudo ./scripts/setup.sh shop)"; fi
+	fi
+
 	[ "$FAILED" -eq 0 ] || exit 1
 }
 
@@ -591,10 +653,15 @@ uninstall() {
 		ok 'Not installed'
 	fi
 
+	if shop_installed; then
+		shop_compose down -v --remove-orphans >/dev/null 2>&1 || warn 'docker compose down failed for the Fault Shop'
+		ok 'Fault Shop stopped and removed'
+	fi
+
 	step 'Zabbix'
 	if command -v python3 >/dev/null && find_api && [ -n "${ZABBIX_API_TOKEN:-}" ]; then
-		ids="$(api host.get "{\"output\":[\"hostid\"],\"filter\":{\"host\":[\"apm-$DEMO_NAMESPACE\"]}}" | python3 -c 'import json, sys; print(json.dumps([h["hostid"] for h in json.load(sys.stdin)]))')"
-		[ "$ids" = '[]' ] || { api host.delete "$ids" >/dev/null && ok "Host apm-$DEMO_NAMESPACE deleted"; }
+		ids="$(api host.get "{\"output\":[\"hostid\"],\"filter\":{\"host\":[\"apm-$DEMO_NAMESPACE\",\"apm-$SHOP_NAMESPACE\"]}}" | python3 -c 'import json, sys; print(json.dumps([h["hostid"] for h in json.load(sys.stdin)]))')"
+		[ "$ids" = '[]' ] || { api host.delete "$ids" >/dev/null && ok "Hosts of the test stores deleted"; }
 
 		api settings.update '{"apm_global_db":{"status":0}}' >/dev/null 2>&1 \
 			&& ok 'APM data source disabled' || warn 'Disable it in Administration -> Data source -> APM'
@@ -641,8 +708,8 @@ command="${1:-}"
 [ "$#" -gt 0 ] && shift
 
 case "$command" in
-	check | install | demo | verify | status | uninstall) ;;
-	*) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+	check | install | demo | shop | verify | status | uninstall) ;;
+	*) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 
 [ "$(id -u)" -eq 0 ] || { echo "Run it with sudo: sudo $0 $command" >&2; exit 1; }
@@ -655,6 +722,7 @@ case "$command" in
 	check) check; printf '\nAll good. Next: sudo ./scripts/setup.sh install\n' ;;
 	install) install_all ;;
 	demo) demo "$@" ;;
+	shop) shop "$@" ;;
 	verify) verify "$@" ;;
 	status) status ;;
 	uninstall) uninstall "$@" ;;

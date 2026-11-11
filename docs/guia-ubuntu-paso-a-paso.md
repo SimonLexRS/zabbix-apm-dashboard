@@ -19,7 +19,7 @@ flowchart LR
 | **Ubuntu o Debian**, `amd64` o `arm64` | Con un usuario que pueda usar `sudo` y salida a Internet |
 | **Token de API de un Super admin** | En Zabbix: **User settings → API tokens → Create API token**. Cópialo: se pide una sola vez |
 | **4 GiB de RAM y 5 GB de disco** | Con la tienda de prueba: **10 GiB de RAM y 20 GB de disco** |
-| **Puertos libres** | `8123` y `9000` (ClickHouse), `4317` y `4318` (Collector); con la tienda, `18080` |
+| **Puertos libres** | `8123` y `9000` (ClickHouse), `4317` y `4318` (Collector); con la tienda, `18080`; con la Fault Shop, `18090` |
 
 El paso 2 comprueba todo esto antes de instalar nada.
 
@@ -78,6 +78,16 @@ La primera vez descarga 8.6 GB de imágenes. Instala Docker, hace que el Collect
 > [!WARNING]
 > La tienda queda abierta en el puerto 18080 sin autenticación. Úsala solo en una red de pruebas.
 
+### Una tienda más pequeña, con fallos a voluntad
+
+La [Fault Shop](../examples/stacks/fault-shop/README.es.md) necesita 300 MiB en vez de 10 GiB y tiene un panel de interruptores: base de datos lenta, compras fallidas, un servicio caído. Puede ir sola o junto a la tienda de arriba:
+
+```sh
+sudo ./scripts/setup.sh shop 192.168.56.2
+```
+
+✅ Termina con `Traces from the shop are arriving in ClickHouse`. Tienda en `http://<IP>:18090/`, panel en `http://<IP>:18090/faults.html`, y en Zabbix **APM → Overview → fault-shop**. Compárala con ClickHouse con `sudo ./scripts/setup.sh verify fault-shop`.
+
 ## 5. Verificar
 
 Espera 10 minutos, para que Zabbix tenga valores de todos los items, y compara lo que muestra con lo que hay en ClickHouse:
@@ -110,6 +120,7 @@ Más casos en [troubleshooting.md](troubleshooting.md).
 | Tarea | Comando |
 |---|---|
 | Detener la tienda | `sudo ./scripts/setup.sh demo stop` |
+| Detener la Fault Shop | `sudo ./scripts/setup.sh shop stop` |
 | Volver a iniciarla | `sudo ./scripts/setup.sh demo <IP>` |
 | Actualizar los módulos | `git pull && sudo ./scripts/setup.sh install` |
 | Quitar la tienda, los módulos y el Collector | `sudo ./scripts/setup.sh uninstall` |

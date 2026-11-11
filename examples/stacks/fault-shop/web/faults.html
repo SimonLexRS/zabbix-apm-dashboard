@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fault panel · Fault Shop</title>
+<link rel="stylesheet" href="shop.css">
+</head>
+<body>
+<header></header>
+<main>
+	<h1 data-t="title"></h1>
+	<p class="muted" data-t="intro"></p>
+	<p id="notice" class="notice"></p>
+	<div class="bar">
+		<strong class="state" id="state"></strong>
+		<button type="button" id="reset" data-t="reset"></button>
+	</div>
+	<div id="faults" class="faults"></div>
+	<h2 data-t="more"></h2>
+	<p class="muted" data-t="moreText"></p>
+</main>
+<script type="module">
+	import { api, notice } from './shop.js';
+
+	const es = navigator.language.startsWith('es');
+	const text = es ? {
+		title: 'Panel de fallos',
+		intro: 'Cada interruptor rompe una parte de la tienda hasta que lo apagues. Actúa en unos segundos, sobre los clientes simulados y sobre lo que hagas tú en la tienda.',
+		reset: 'Volver todo a la normalidad',
+		normal: 'Todo normal', active: (count) => count === 1 ? '1 fallo activo' : count + ' fallos activos',
+		more: 'Fallos que no son un interruptor',
+		moreText: 'Caída real de un servicio (conexión rechazada) y despliegue de una versión defectuosa: se hacen con docker compose; están en el README de este ejemplo.',
+		off: 'No', on: 'Sí', see: 'En Zabbix: '
+	} : {
+		title: 'Fault panel',
+		intro: 'Each switch breaks one part of the store until you turn it off. It acts within seconds, on the simulated customers and on what you do in the store yourself.',
+		reset: 'Back to normal',
+		normal: 'Everything normal', active: (count) => count === 1 ? '1 fault active' : count + ' faults active',
+		more: 'Faults that are not a switch',
+		moreText: 'A service really going down (connection refused) and the release of a defective version: both are done with docker compose; see the README of this example.',
+		off: 'Off', on: 'On', see: 'In Zabbix: '
+	};
+
+	const ms = (value) => value >= 1000 ? value / 1000 + ' s' : value + ' ms';
+	// key, choices (value -> label), title and where it shows in Zabbix, in English and Spanish.
+	const FAULTS = [
+		['db_slow_ms', [0, 500, 2000, 6000], ms,
+			['Slow database', 'catalog: slow PostgreSQL queries; p95 of GET /products; at 6 s, also slow purchases.'],
+			['Base de datos lenta', 'catalog: consultas lentas a PostgreSQL; p95 de GET /products; con 6 s, también compras lentas.']],
+		['n_plus_one', null, null,
+			['N+1 queries in the product list', 'Trace of GET /products: 17 queries instead of 1.'],
+			['Consultas N+1 en la lista de productos', 'Traza de GET /products: 17 consultas en vez de 1.']],
+		['payment_fail_pct', [0, 20, 50, 100], (value) => value + ' %',
+			['Purchases fail at payment', 'Errors: CardDeclinedError in payment, and the failed POST /orders of checkout and shop.'],
+			['Las compras fallan en el pago', 'Errors: CardDeclinedError en payment, y el POST /orders fallido de checkout y shop.']],
+		['bank_slow_ms', [0, 1000, 3000, 6000], ms,
+			['Slow bank (outside service)', 'Map: slow line payment → bank. At 6 s payment gives up (4 s timeout) and purchases fail.'],
+			['Banco lento (servicio externo)', 'Mapa: línea lenta payment → bank. Con 6 s payment desiste (límite de 4 s) y las compras fallan.']],
+		['down', ['catalog', 'checkout', 'payment', 'bank'], null,
+			['Service down', 'catalog, checkout and payment answer 503; bank closes the connection. Red nodes on the map; "error rate" problems.'],
+			['Servicio caído', 'catalog, checkout y payment responden 503; bank cierra la conexión. Nodos rojos en el mapa; problemas de «error rate».']],
+		['poison_product', null, null,
+			['One product breaks the code', 'Only "Mystery box" fails: TypeError in GET /products/:id; the tag analysis points at app.product.id = 13.'],
+			['Un producto rompe el código', 'Solo falla «Mystery box»: TypeError en GET /products/:id; el análisis de etiquetas señala app.product.id = 13.']],
+		['out_of_stock', null, null,
+			['Out of stock (business refusal)', 'Purchases answer 409. Nobody failed: the services stay green; only the calls between them are marked.'],
+			['Sin existencias (rechazo de negocio)', 'Las compras responden 409. Nadie falló: los servicios siguen en verde; solo se marcan las llamadas entre ellos.']],
+		['cpu_burn_ms', [0, 200, 800, 2000], ms,
+			['CPU-bound checkout', 'Span "validate order" in checkout with no call inside: time spent in its own code.'],
+			['Checkout con la CPU ocupada', 'Span «validate order» en checkout sin llamadas dentro: tiempo en su propio código.']],
+		['notifier_slow_ms', [0, 1000, 5000], ms,
+			['Slow e-mail queue', 'The purchase answers fast, but its trace gets longer: "orders process" in notifier.'],
+			['Cola de correos lenta', 'La compra responde rápido, pero su traza se alarga: «orders process» en notifier.']],
+		['notifier_fail', null, null,
+			['E-mails fail', 'Errors in notifier (ConnectionError) while the purchases themselves succeed.'],
+			['Los correos fallan', 'Errores en notifier (ConnectionError) mientras las compras salen bien.']],
+		['js_error', null, null,
+			['JavaScript error on "Add to cart"', 'Real user monitoring → Errors: TypeError of the page. Needs you clicking: the simulated customers have no browser.'],
+			['Error de JavaScript en «Add to cart»', 'Real user monitoring → Errors: TypeError de la página. Hace falta que hagas clic tú: los clientes simulados no tienen navegador.']],
+		['load_rps', [0, 1, 2, 5], (value) => value === 0 ? (es ? 'Parados' : 'Stopped') : value + '/s',
+			['Simulated customers', 'Visits per second. Stopped: only your own traffic, and the "No spans received" trigger after its time.'],
+			['Clientes simulados', 'Visitas por segundo. Parados: solo tu tráfico, y el trigger «No spans received» pasado su tiempo.']]
+	];
+
+	document.querySelectorAll('[data-t]').forEach((element) => element.textContent = text[element.dataset.t]);
+
+	const panel = document.getElementById('faults');
+	let values = {};
+
+	const isOn = (key, value) => key === 'down' ? value.length > 0 : key === 'load_rps' ? false : Boolean(value);
+
+	function draw() {
+		panel.replaceChildren();
+
+		for (const [key, choices, label, en, spanish] of FAULTS) {
+			const [title, see] = es ? spanish : en;
+			const box = document.createElement('section');
+			const control = document.createElement('div');
+
+			box.className = 'fault' + (isOn(key, values[key]) ? ' on' : '');
+			box.innerHTML = '<span class="title"></span>';
+			box.querySelector('.title').textContent = title;
+			control.className = 'control';
+
+			const options = key === 'down' ? choices.map((service) => [service, service])
+				: choices === null ? [[false, text.off], [true, text.on]]
+				: choices.map((choice) => [choice, choice === 0 && key !== 'load_rps' ? text.off : label(choice)]);
+
+			for (const [value, caption] of options) {
+				const button = document.createElement('button');
+				const pressed = key === 'down' ? values.down.includes(value) : values[key] === value;
+
+				button.type = 'button';
+				button.textContent = caption;
+				button.setAttribute('aria-pressed', pressed);
+				button.classList.toggle('off', key !== 'down' && key !== 'load_rps' && !value);
+				button.addEventListener('click', () => change(key, key !== 'down' ? value
+					: pressed ? values.down.filter((service) => service !== value) : [...values.down, value]));
+				control.append(button);
+			}
+
+			const hint = document.createElement('span');
+
+			hint.className = 'see';
+			hint.textContent = text.see + see;
+			box.append(control, hint);
+			panel.append(box);
+		}
+
+		const count = FAULTS.filter(([key]) => isOn(key, values[key])).length;
+
+		document.getElementById('state').textContent = count === 0 ? text.normal : text.active(count);
+	}
+
+	async function change(key, value) {
+		try {
+			values = await api('/faults', { method: 'PUT', body: { [key]: value } });
+			notice('');
+		}
+		catch (error) {
+			notice(error.message, 'error');
+		}
+
+		draw();
+	}
+
+	document.getElementById('reset').addEventListener('click', async () => {
+		values = await api('/faults', { method: 'DELETE' });
+		draw();
+	});
+
+	try {
+		values = await api('/faults');
+		draw();
+		// Another person may be using the panel too.
+		setInterval(async () => { values = await api('/faults').catch(() => values); draw(); }, 5000);
+	}
+	catch (error) {
+		notice(error.message, 'error');
+	}
+</script>
+</body>
+</html>

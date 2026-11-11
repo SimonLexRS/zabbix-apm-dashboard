@@ -19,7 +19,7 @@ flowchart LR
 | **Ubuntu or Debian**, `amd64` or `arm64` | With a user that can use `sudo`, and Internet access |
 | **API token of a Super admin** | In Zabbix: **User settings → API tokens → Create API token**. Copy it: it is asked only once |
 | **4 GiB of RAM and 5 GB of disk** | With the test store: **10 GiB of RAM and 20 GB of disk** |
-| **Free ports** | `8123` and `9000` (ClickHouse), `4317` and `4318` (Collector); with the store, `18080` |
+| **Free ports** | `8123` and `9000` (ClickHouse), `4317` and `4318` (Collector); with the store, `18080`; with the Fault Shop, `18090` |
 
 Step 2 checks all of this before installing anything.
 
@@ -78,6 +78,16 @@ The first time it downloads 8.6 GB of images. It installs Docker, makes the Coll
 > [!WARNING]
 > The store is open on port 18080 without authentication. Use it on a test network only.
 
+### A smaller store, with failures on demand
+
+The [Fault Shop](../examples/stacks/fault-shop/README.md) needs 300 MiB instead of 10 GiB and has a panel of switches: slow database, failed purchases, a service down. It can run alone or next to the store above:
+
+```sh
+sudo ./scripts/setup.sh shop 192.168.56.2
+```
+
+✅ It ends with `Traces from the shop are arriving in ClickHouse`. Store at `http://<IP>:18090/`, panel at `http://<IP>:18090/faults.html`, and in Zabbix **APM → Overview → fault-shop**. Compare it with ClickHouse with `sudo ./scripts/setup.sh verify fault-shop`.
+
 ## 5. Verify
 
 Wait 10 minutes, so that Zabbix has values for every item, and compare what it shows with what is in ClickHouse:
@@ -110,6 +120,7 @@ More cases in [troubleshooting.md](troubleshooting.md).
 | Task | Command |
 |---|---|
 | Stop the store | `sudo ./scripts/setup.sh demo stop` |
+| Stop the Fault Shop | `sudo ./scripts/setup.sh shop stop` |
 | Start it again | `sudo ./scripts/setup.sh demo <IP>` |
 | Update the modules | `git pull && sudo ./scripts/setup.sh install` |
 | Remove the store, the modules and the Collector | `sudo ./scripts/setup.sh uninstall` |

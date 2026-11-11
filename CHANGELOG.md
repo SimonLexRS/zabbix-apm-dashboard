@@ -1,5 +1,61 @@
 # Changelog
 
+## 2.6.0
+
+**Fault Shop: a test store you break by hand** (`examples/stacks/fault-shop`, `sudo ./scripts/setup.sh shop <IP>`).
+Ten light containers (about 300 MiB): a browser front end, `shop` and `checkout` in Python, `catalog` and `payment` in
+Node.js, PostgreSQL, a Redis queue with its worker, an outside "bank" that sends no telemetry and simulated customers.
+Its **fault panel** has twelve switches: slow database, N+1 queries, purchases failing at payment, slow bank, a service
+down, one product that breaks the code, out of stock, CPU-bound checkout, slow or failing e-mail queue, a JavaScript
+error in the page and the rate of the simulated customers. A really stopped container and a defective release
+(`CHECKOUT_VERSION=1.1.0`) are one command each. The command creates the host `apm-fault-shop`; its guide says where
+each fault shows in Zabbix and follows the data from the services to the Collector, ClickHouse and Zabbix.
+`setup.sh status` and `uninstall` know about it; `demo` and `shop` share the step that makes the Collector listen on
+the Docker bridge.
+
+**Service map, redrawn.** It read like a template: identical cards with a colored bar and a pastel fill, the same
+hexagon in each, four KPI cards above and dots moving along every arrow. Now it is a graph:
+
+- A node is a circle **as large as its traffic**, with its **technology inside** (`Go`, `Java`, `.NET`, `JS`, `Py`...,
+  as letters on a soft tint) and a **ring that is its health** now: green when healthy, all amber or red when it is
+  slow or has open problems, and, when requests fail, a **red arc as long as the share that fails**. Databases,
+  queues, external hosts, the users and the browser have their own shapes. Under each node, its name and **one
+  figure**: what is wrong with it, or, when nothing is, its traffic.
+- Lines are **grey**; they take a color only when something is wrong on them now. Nothing moves until you point at a
+  node or pick one: then the flow runs along its connections.
+- A connection that skips a column goes through a lane of its own in the columns it crosses, instead of running behind
+  other nodes.
+- **Click a service** to keep only its path on the map (who calls it, what it calls) and open its **panel**: figures of
+  the period and of now, trends, Zabbix problems, version, callers and callees, and the ways further in. Escape, or a
+  click on the empty part of the map, brings everything back.
+- Above the map: one line that says how things are, what needs attention, a search box, *Only what has a problem* and
+  *Hide databases, queues and external services*. What you pick survives the real-time refresh.
+
+**Zabbix problems on the map.** A problem with the tag `service = <service name>` belongs to that service: its node
+shows a mark with the highest severity and the count, and its health is the worst of telemetry and problems (Average or
+higher = problem, Warning = warning). The problems of the application host (`apm-<namespace>`) are in the summary line;
+those of the hosts a service runs on (`host.name`) are in its panel and its page.
+
+**Page of a service and of an endpoint** (`apm.service`), from the map, the Services and Endpoints tabs and the
+tables:
+
+- Requests, error rate and latency over the period, with **yesterday and last week** as dashed lines and a mark at
+  each deployment; who calls it and what it calls; versions; endpoints; where the time goes.
+- For an endpoint: latency distribution and **what a request is made of** (per operation below it: spans per request,
+  share of the requests, average duration, share of the time).
+- **Errors and versions:** its error groups with their state, and its newest version against the one before.
+- **Why slow, why failing:** the attribute values (route, version, host, status code...) that appear much more in the
+  slowest 5 % of the requests, or in the failed ones, than in the rest; and the slowest requests.
+
+**Versions and deployments** (`service.version`): per version, first and last seen, traffic, error rate and p95; a
+version first seen in the period is a deployment; two versions side by side per endpoint, with the errors that only
+one of them has; an error group says which version brought it, or brought it back.
+
+`test-rum.py --send-error` takes `--version` and `--healthy`, to send a version that works and one that fails.
+
+Still missing next to Datadog APM: grouping the map by team or owner, SLOs from APM (Zabbix has SLA), a trace explorer
+with group-by and time series, infrastructure and runtime metrics per service, and queue lag.
+
 ## 2.5.0
 
 APM and Real user monitoring in one path, in both directions, and errors that know when they are solved.

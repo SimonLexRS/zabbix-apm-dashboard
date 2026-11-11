@@ -1,0 +1,10 @@
+{
+  "name": "fault-shop-node",
+  "private": true,
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "0.83.0",
+    "express": "^5.1.0",
+    "pg": "^8.13.0"
+  }
+}
