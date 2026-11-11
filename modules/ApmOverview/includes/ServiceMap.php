@@ -27,12 +27,21 @@ class ServiceMap {
 		'error_high' => 5
 	];
 
-	private const NODE_WIDTH = 160;
-	private const NODE_HEIGHT = 54;
-	private const COLUMN_GAP = 80;
-	private const ROW_GAP = 18;
-	private const PADDING = 16;
-	private const NAME_MAX_LENGTH = 20;
+	// Nodes: circles from RADIUS_MIN (no traffic) to RADIUS_MAX (the busiest), with two lines of text below.
+	public const RADIUS_MIN = 15;
+	public const RADIUS_MAX = 30;
+	private const LABEL_HEIGHT = 34;
+	private const COLUMN_WIDTH = 190;
+	private const ROW_GAP = 14;
+	// Height of the lane a connection takes in a column it only crosses.
+	private const WAYPOINT_HEIGHT = 16;
+	private const ARROW_GAP = 5;
+	private const PADDING = 20;
+	private const NAME_MAX_LENGTH = 22;
+
+	// Zabbix trigger severities from which an open problem makes a node a warning or a problem.
+	public const SEVERITY_WARNING = 2;
+	public const SEVERITY_PROBLEM = 3;
 
 	// The map is shrunk at most to this share of its natural size; wider maps scroll instead of becoming unreadable.
 	private const MIN_SCALE = 0.8;
@@ -42,6 +51,8 @@ class ServiceMap {
 
 	private const EDGE_WIDTH_MIN = 1.5;
 	private const EDGE_WIDTH_MAX = 8;
+	// As drawn: thinner than the scale above, so that the lines do not compete with the nodes.
+	private const EDGE_DRAW_SCALE = 0.7;
 
 	// Calls per minute from which the particles of an edge move at medium and fast speed.
 	private const FLOW_MEDIUM = 5;
@@ -99,7 +110,8 @@ class ServiceMap {
 				'p95' => $service['p95'],
 				'now' => $service['recent'] ?? null,
 				'measured' => true,
-				'browser' => $service['browser'] ?? false
+				'browser' => $service['browser'] ?? false,
+				'language' => $service['language'] ?? ''
 			]);
 
 			// Only what came from outside is user traffic: a consumer or a timer that starts its own trace is not.
@@ -260,7 +272,7 @@ class ServiceMap {
 			}
 
 			[$error_rate, $p95] = self::current($node);
-			$health = self::health($error_rate, $p95, $thresholds);
+			$health = self::nodeHealth($node, $thresholds);
 			$result['health'][$health]++;
 
 			if ($node['p95'] !== null && ($result['slowest'] === null || $node['p95'] > $result['slowest']['p95'])) {
@@ -268,9 +280,14 @@ class ServiceMap {
 			}
 
 			if ($health !== 'ok') {
-				$attention[] = [$health, $error_rate, $p95 ?? 0, $node['name'],
-					self::reason($error_rate, $p95, $thresholds), $node['name']
-				];
+				$problems = $node['problems'] ?? null;
+
+				$attention[] = [$health, $error_rate, $p95 ?? 0, $node['name'], implode(' · ', array_filter([
+					self::reason($error_rate, $p95, $thresholds),
+					$problems !== null && $problems['count'] > 0
+						? sprintf(I18n::t('Zabbix: %s'), $problems['worst']).($problems['count'] > 1 ? ' +'.($problems['count'] - 1) : '')
+						: ''
+				])), $node['name']];
 			}
 		}
 
@@ -405,9 +422,174 @@ class ServiceMap {
 	}
 
 	/**
-	 * Map as SVG with a legend.
+	 * Radius of a node from its share of the traffic of the busiest node (square root: area follows traffic, and small
+	 * services stay visible).
+	 */
+	public static function nodeRadius(float $rpm, float $max_rpm): float {
+		if ($max_rpm <= 0) {
+			return self::RADIUS_MIN;
+		}
+
+		return round(self::RADIUS_MIN + (self::RADIUS_MAX - self::RADIUS_MIN) * sqrt(min(1, max(0, $rpm) / $max_rpm)), 1);
+	}
+
+	/**
+	 * Where everything goes: one column per layer, and, for a connection that skips columns, a waypoint in each column
+	 * it crosses, so that its line runs between the nodes instead of behind them. Connections that leave the same node
+	 * share their waypoints (one lane per source).
 	 *
-	 * @param array $graph       Output of build().
+	 * @return array  ['positions' => [id => [x, y]] (centers, waypoints included), 'routes' => [edge index => [id, ...]]
+	 *                (from, waypoints, to), 'radius' => [id => float], 'width' => float, 'height' => float]
+	 */
+	public static function layout(array $graph): array {
+		$nodes = $graph['nodes'];
+		$routes = [];
+		$segments = [];
+
+		foreach ($graph['edges'] as $i => $edge) {
+			$from = $nodes[$edge['from']]['layer'];
+			$to = $nodes[$edge['to']]['layer'];
+			$route = [$edge['from']];
+
+			for ($layer = $from + 1; $layer < $to; $layer++) {
+				$id = 'wp:'.$edge['from'].':'.$layer;
+				$nodes[$id] ??= ['id' => $id, 'kind' => 'waypoint', 'name' => $id, 'requests' => 0, 'rpm' => 0,
+					'layer' => $layer
+				];
+				$route[] = $id;
+			}
+
+			$route[] = $edge['to'];
+			$routes[$i] = $route;
+
+			for ($j = 1; $j < count($route); $j++) {
+				$segments[$route[$j - 1].'>'.$route[$j]] = ['from' => $route[$j - 1], 'to' => $route[$j]];
+			}
+		}
+
+		$columns = self::orderColumns($nodes, array_values($segments));
+		$max_rpm = max(array_map(static fn(array $node): float => $node['kind'] === 'users' ? 0 : $node['rpm'], $nodes) ?: [0]);
+		$radius = [];
+		$heights = [];
+
+		foreach ($nodes as $id => $node) {
+			$radius[$id] = match ($node['kind']) {
+				'waypoint' => 0.0,
+				'users' => self::RADIUS_MAX * 0.75,
+				'service' => self::nodeRadius($node['rpm'], $max_rpm),
+				default => self::RADIUS_MIN
+			};
+			$heights[$id] = $node['kind'] === 'waypoint' ? self::WAYPOINT_HEIGHT : 2 * $radius[$id] + self::LABEL_HEIGHT;
+		}
+
+		$column_heights = [];
+
+		foreach ($columns as $layer => $ids) {
+			$column_heights[$layer] = array_sum(array_map(static fn(string $id): float => $heights[$id], $ids))
+				+ (count($ids) - 1) * self::ROW_GAP;
+		}
+
+		$height = 2 * self::PADDING + max($column_heights);
+		$width = 2 * self::PADDING + count($columns) * self::COLUMN_WIDTH;
+		$positions = [];
+		$column_index = 0;
+
+		foreach ($columns as $layer => $ids) {
+			$y = ($height - $column_heights[$layer]) / 2;
+
+			foreach ($ids as $id) {
+				$positions[$id] = [
+					self::PADDING + ($column_index + 0.5) * self::COLUMN_WIDTH,
+					// The center of the shape; the label hangs below it.
+					$nodes[$id]['kind'] === 'waypoint' ? $y + $heights[$id] / 2 : $y + $radius[$id]
+				];
+				$y += $heights[$id] + self::ROW_GAP;
+			}
+
+			$column_index++;
+		}
+
+		return ['positions' => $positions, 'routes' => $routes, 'radius' => $radius, 'width' => $width, 'height' => $height];
+	}
+
+	/**
+	 * Line of a connection through its waypoints: horizontal at both ends and at every waypoint, from the edge of one
+	 * shape to the edge of the other.
+	 */
+	public static function routePath(array $route, array $positions, array $radius): string {
+		$points = [];
+
+		foreach ($route as $i => $id) {
+			[$x, $y] = $positions[$id];
+
+			if ($i == 0) {
+				$x += $radius[$id] + 1;
+			}
+			elseif ($i == count($route) - 1) {
+				$x -= $radius[$id] + self::ARROW_GAP;
+			}
+
+			$points[] = [$x, $y];
+		}
+
+		$d = sprintf('M%.1f,%.1f', ...$points[0]);
+
+		for ($i = 1; $i < count($points); $i++) {
+			[$x1, $y1] = $points[$i - 1];
+			[$x2, $y2] = $points[$i];
+			$dx = max(24, abs($x2 - $x1) / 2);
+
+			// A connection that goes back (a call cycle) loops out to the right and comes in from the left.
+			$d .= sprintf(' C%.1f,%.1f %.1f,%.1f %.1f,%.1f', $x1 + $dx, $y1, $x2 - $dx, $y2, $x2, $y2);
+		}
+
+		return $d;
+	}
+
+	/**
+	 * The one figure written under a node: what is wrong with it now, or, when nothing is, its traffic.
+	 *
+	 * @return array  [string $text, bool $hot]
+	 */
+	public static function nodeFigure(array $node, array $thresholds = self::DEFAULT_THRESHOLDS): array {
+		if ($node['kind'] === 'users') {
+			return [self::formatRate($node['rpm']).'/min', false];
+		}
+
+		[$error_rate, $p95] = self::current($node);
+
+		if ($error_rate >= $thresholds['error_warning']) {
+			return [sprintf(I18n::t('%s errors'), sprintf('%.1f %%', $error_rate)), true];
+		}
+
+		if ($p95 !== null && $p95 >= $thresholds['latency_warning']) {
+			return ['p95 '.self::shortDuration($p95), true];
+		}
+
+		return [self::formatRate($node['rpm']).'/min', false];
+	}
+
+	/**
+	 * Health of a node: the worst of what telemetry says now and of its open Zabbix problems.
+	 */
+	public static function nodeHealth(array $node, array $thresholds = self::DEFAULT_THRESHOLDS): string {
+		[$error_rate, $p95] = self::current($node);
+		$health = self::health($error_rate, $p95, $thresholds);
+		$severity = $node['problems']['severity'] ?? -1;
+
+		if ($severity >= self::SEVERITY_PROBLEM) {
+			return 'bad';
+		}
+
+		return $severity >= self::SEVERITY_WARNING && $health === 'ok' ? 'warn' : $health;
+	}
+
+	/**
+	 * Map as SVG with a legend: a graph that reads from the users, on the left, to the dependencies, on the right.
+	 * A node is as large as its traffic and its ring is its health; a line is grey unless something is wrong on it now.
+	 * Nothing moves until a node is pointed at or picked (CApmServiceMapInteraction).
+	 *
+	 * @param array $graph       Output of build(); nodes may carry 'problems' (ZabbixProblems::forServices()).
 	 * @param array $ctx         ['from' => string, 'to' => string] time period of the trace links, optional
 	 *                           'focus' => service pattern (as the page filter) to highlight; the rest is dimmed.
 	 * @param array $thresholds  See DEFAULT_THRESHOLDS.
@@ -436,27 +618,9 @@ class ServiceMap {
 			}
 		}
 
-		$columns = self::orderColumns($nodes, $graph['edges']);
-		$max_rows = max(array_map('count', $columns));
-		$width = 2 * self::PADDING + count($columns) * self::NODE_WIDTH + (count($columns) - 1) * self::COLUMN_GAP;
-		$height = 2 * self::PADDING + $max_rows * self::NODE_HEIGHT + ($max_rows - 1) * self::ROW_GAP;
-
-		$positions = [];
-		$column_index = 0;
-
-		foreach ($columns as $ids) {
-			$column_height = count($ids) * self::NODE_HEIGHT + (count($ids) - 1) * self::ROW_GAP;
-			$top = ($height - $column_height) / 2;
-
-			foreach ($ids as $row => $id) {
-				$positions[$id] = [
-					self::PADDING + $column_index * (self::NODE_WIDTH + self::COLUMN_GAP),
-					$top + $row * (self::NODE_HEIGHT + self::ROW_GAP)
-				];
-			}
-
-			$column_index++;
-		}
+		$layout = self::layout($graph);
+		$positions = $layout['positions'];
+		$radius = $layout['radius'];
 
 		$defs = new CTag('defs', true);
 
@@ -470,19 +634,19 @@ class ServiceMap {
 					->setAttribute('refX', '9')
 					->setAttribute('refY', '5')
 					->setAttribute('markerUnits', 'userSpaceOnUse')
-					->setAttribute('markerWidth', '9')
-					->setAttribute('markerHeight', '9')
+					->setAttribute('markerWidth', '8')
+					->setAttribute('markerHeight', '8')
 					->setAttribute('orient', 'auto-start-reverse')
-					->addItem((new CTag('path', true))->setAttribute('d', 'M0,0 L10,5 L0,10 z'))
+					->addItem((new CTag('path', true))->setAttribute('d', 'M1,1 L9,5 L1,9 z'))
 			);
 		}
 
 		$svg = (new CTag('svg', true))
 			->addClass('apm-map-svg')
-			->setAttribute('width', (string) $width)
-			->setAttribute('height', (string) $height)
-			->setAttribute('viewBox', '0 0 '.$width.' '.$height)
-			->setAttribute('style', 'min-width: '.round($width * self::MIN_SCALE).'px')
+			->setAttribute('width', (string) round($layout['width']))
+			->setAttribute('height', (string) round($layout['height']))
+			->setAttribute('viewBox', sprintf('0 0 %d %d', round($layout['width']), round($layout['height'])))
+			->setAttribute('style', 'min-width: '.round($layout['width'] * self::MIN_SCALE).'px')
 			->setAttribute('role', 'img')
 			->setAttribute('aria-label', I18n::t('Service map: users, services and their dependencies'))
 			->addItem($defs);
@@ -505,91 +669,64 @@ class ServiceMap {
 		$edge_layer = (new CTag('g', true))->addClass('apm-map-edges');
 
 		foreach ($graph['edges'] as $i => $edge) {
-			$dim = $focus !== '' && !array_key_exists($i, $lit_edges);
-			[$x1, $y1] = $positions[$edge['from']];
-			[$x2, $y2] = $positions[$edge['to']];
-
-			$x1 += self::NODE_WIDTH;
-			$y1 += self::NODE_HEIGHT / 2;
-			$y2 += self::NODE_HEIGHT / 2;
-			$dx = max(40, abs($x2 - $x1) / 2);
-			$d = sprintf('M%.1f,%.1f C%.1f,%.1f %.1f,%.1f %.1f,%.1f', $x1, $y1, $x1 + $dx, $y1, $x2 - $dx, $y2, $x2 - 2, $y2);
-
+			$d = self::routePath($layout['routes'][$i], $positions, $radius);
 			$error_rate = self::errorRate($edge['errors'], $edge['calls']);
 			[$now_error_rate, $now_p95] = self::current($edge);
 			$health = self::health($now_error_rate, $now_p95, $thresholds);
 			$from_name = $nodes[$edge['from']]['name'];
 			$to_name = $nodes[$edge['to']]['name'];
-			$width_px = self::edgeWidth($edge['rpm'], $max_rpm);
+			$width_px = round(self::edgeWidth($edge['rpm'], $max_rpm) * self::EDGE_DRAW_SCALE, 1);
 
-			$group = (new CTag('g', true))
-				->addClass('apm-map-edge')
-				->addClass('apm-map-'.$health)
-				->addClass('apm-map-flow-'.self::flowSpeed($edge['rpm']))
-				->addClass($now_error_rate > 0 ? 'apm-map-erroring' : null)
-				->addClass($dim ? 'apm-map-dim' : null)
-				->setAttribute('data-apm-edge', $edge['from'].'>'.$edge['to'])
-				->setAttribute('data-from', $edge['from'])
-				->setAttribute('data-to', $edge['to'])
-				->setAttribute('data-tip-title', $from_name.' → '.$to_name)
-				->setAttribute('data-tip', implode("\n", array_filter([
-					sprintf(I18n::t('Calls: %s (%s/min)'), self::formatCount($edge['calls']), self::formatRate($edge['rpm'])),
-					sprintf(I18n::t('Errors: %s'), sprintf('%.1f %%', $error_rate)),
-					'p95: '.ApmStats::formatDuration($edge['p95'] ?? 0),
-					self::nowLine($edge)
-				])))
-				->addItem(
-					(new CTag('path', true))
-						->addClass('apm-map-line')
-						->setAttribute('d', $d)
-						->setAttribute('stroke-width', (string) $width_px)
-						->setAttribute('marker-end', 'url(#apm-map-arrow-'.$health.')')
-				)
-				->addItem(
-					(new CTag('path', true))
-						->addClass('apm-map-flow')
-						->setAttribute('d', $d)
-						->setAttribute('stroke-width', (string) max(2.5, min(5, $width_px)))
-				);
-
-			$edge_layer->addItem(self::link(self::edgeUrl($edge, $nodes, $ctx),
-				$from_name.' → '.$to_name, $group
-			));
+			$edge_layer->addItem(
+				(new CTag('g', true))
+					->addClass('apm-map-edge')
+					->addClass('apm-map-'.$health)
+					->addClass('apm-map-flow-'.self::flowSpeed($edge['rpm']))
+					->addClass($focus !== '' && !array_key_exists($i, $lit_edges) ? 'apm-map-dim' : null)
+					->setAttribute('data-apm-edge', $edge['from'].'>'.$edge['to'])
+					->setAttribute('data-from', $edge['from'])
+					->setAttribute('data-to', $edge['to'])
+					->setAttribute('data-health', $health)
+					->setAttribute('aria-label', $from_name.' → '.$to_name)
+					->setAttribute('data-tip-title', $from_name.' → '.$to_name)
+					->setAttribute('data-tip', implode("\n", array_filter([
+						sprintf(I18n::t('Calls: %s (%s/min)'), self::formatCount($edge['calls']), self::formatRate($edge['rpm'])),
+						sprintf(I18n::t('Errors: %s'), sprintf('%.1f %%', $error_rate)),
+						'p95: '.ApmStats::formatDuration($edge['p95'] ?? 0),
+						self::nowLine($edge)
+					])))
+					// A wide transparent line makes a thin connection easy to point at.
+					->addItem((new CTag('path', true))->addClass('apm-map-hit')->setAttribute('d', $d))
+					->addItem(
+						(new CTag('path', true))
+							->addClass('apm-map-line')
+							->setAttribute('d', $d)
+							->setAttribute('stroke-width', (string) $width_px)
+							->setAttribute('marker-end', 'url(#apm-map-arrow-'.$health.')')
+					)
+					->addItem(
+						(new CTag('path', true))
+							->addClass('apm-map-flow')
+							->setAttribute('d', $d)
+							->setAttribute('stroke-width', (string) max(2, min(4, $width_px)))
+					)
+			);
 		}
 
 		$node_layer = (new CTag('g', true))->addClass('apm-map-nodes');
 
 		foreach ($nodes as $id => $node) {
 			[$x, $y] = $positions[$id];
+			$r = $radius[$id];
 
 			$error_rate = self::errorRate($node['errors'], $node['requests']);
 			[$now_error_rate, $now_p95] = self::current($node);
-			$health = $node['kind'] === 'users' ? 'neutral' : self::health($now_error_rate, $now_p95, $thresholds);
+			$health = $node['kind'] === 'users' ? 'neutral' : self::nodeHealth($node, $thresholds);
 			$name = mb_strlen($node['name']) > self::NAME_MAX_LENGTH
 				? mb_substr($node['name'], 0, self::NAME_MAX_LENGTH - 1).'…'
 				: $node['name'];
-
-			$stats = (new CTag('text', true))
-				->addClass('apm-map-node-stats')
-				->setAttribute('x', '34')
-				->setAttribute('y', '41');
-
-			if ($node['kind'] === 'users') {
-				$stats->addItem(self::formatRate($node['rpm']).'/min');
-			}
-			else {
-				$stats
-					->addItem(self::formatRate($node['rpm']).'/min · ')
-					->addItem((new CTag('tspan', true, sprintf('%.1f%%', $error_rate)))
-						->addClass($error_rate >= $thresholds['error_warning'] ? 'apm-map-hot' : null)
-					)
-					->addItem($node['p95'] !== null ? ' · ' : '')
-					->addItem($node['p95'] !== null
-						? (new CTag('tspan', true, self::shortDuration($node['p95'])))
-							->addClass($node['p95'] >= $thresholds['latency_warning'] ? 'apm-map-hot' : null)
-						: null
-					);
-			}
+			[$figure, $hot] = self::nodeFigure($node, $thresholds);
+			$problems = $node['problems'] ?? null;
 
 			$tip = [
 				sprintf(I18n::t('Requests: %s (%s/min)'), self::formatCount($node['requests']), self::formatRate($node['rpm']))
@@ -609,10 +746,15 @@ class ServiceMap {
 				);
 			}
 
+			if ($problems !== null && $problems['count'] > 0) {
+				$tip[] = sprintf(I18n::t('Zabbix problems: %d (%s)'), $problems['count'], $problems['worst']);
+			}
+
 			$group = (new CTag('g', true))
 				->addClass('apm-map-node')
 				->addClass('apm-map-'.$health)
 				->addClass('apm-map-kind-'.$node['kind'])
+				->addClass(($node['browser'] ?? false) ? 'apm-map-browser' : null)
 				->addClass($focus !== '' && !array_key_exists($id, $lit_nodes) ? 'apm-map-dim' : null)
 				->addClass($focus !== '' && $node['kind'] === 'service' && self::matches($node['name'], $focus)
 					? 'apm-map-focus'
@@ -620,39 +762,51 @@ class ServiceMap {
 				)
 				->setAttribute('transform', sprintf('translate(%.1f,%.1f)', $x, $y))
 				->setAttribute('data-apm-node', $id)
-				->setAttribute('data-tip-title', $node['name'].' · '.I18n::t(self::KIND_LABELS[$node['kind']]))
+				->setAttribute('data-name', $node['name'])
+				->setAttribute('data-kind', $node['kind'])
+				->setAttribute('data-health', $health)
+				->setAttribute('data-apm-service', $node['kind'] === 'service' ? $node['name'] : null)
+				->setAttribute('data-tip-title', implode(' · ', array_filter([$node['name'],
+					I18n::t(self::KIND_LABELS[$node['kind']]), self::language($node)['name']
+				])))
 				->setAttribute('data-tip', implode("\n", array_filter($tip)))
-				->addItem(
-					(new CTag('rect', true))
-						->addClass('apm-map-card')
-						->setAttribute('width', (string) self::NODE_WIDTH)
-						->setAttribute('height', (string) self::NODE_HEIGHT)
-						->setAttribute('rx', '8')
-				)
-				->addItem(
-					(new CTag('rect', true))
-						->addClass('apm-map-bar')
-						->setAttribute('width', '4')
-						->setAttribute('height', (string) (self::NODE_HEIGHT - 12))
-						->setAttribute('x', '4')
-						->setAttribute('y', '6')
-						->setAttribute('rx', '2')
-				)
-				->addItem(
-					(new CTag('path', true))
-						->addClass('apm-map-icon')
-						->setAttribute('d', self::KIND_ICONS[$node['kind']])
-						->setAttribute('transform', 'translate(12,12)')
-				)
+				->addItem(self::shape($node, $r, $health, $now_error_rate, $now_p95, $thresholds));
+
+			if ($problems !== null && $problems['count'] > 0) {
+				$group
+					->addItem(
+						(new CTag('circle', true))
+							->addClass('apm-map-badge')
+							->addClass('apm-map-severity-'.$problems['severity'])
+							->setAttribute('cx', sprintf('%.1f', $r * 0.75))
+							->setAttribute('cy', sprintf('%.1f', -$r * 0.75))
+							->setAttribute('r', '8')
+					)
+					->addItem(
+						(new CTag('text', true, (string) min(99, $problems['count'])))
+							->addClass('apm-map-badge-text')
+							->setAttribute('x', sprintf('%.1f', $r * 0.75))
+							->setAttribute('y', sprintf('%.1f', -$r * 0.75 + 3.5))
+							->setAttribute('text-anchor', 'middle')
+					);
+			}
+
+			$group
 				->addItem(
 					(new CTag('text', true, $name))
 						->addClass('apm-map-node-name')
-						->setAttribute('x', '34')
-						->setAttribute('y', '23')
+						->setAttribute('y', sprintf('%.1f', $r + 15))
+						->setAttribute('text-anchor', 'middle')
 				)
-				->addItem($stats);
+				->addItem(
+					(new CTag('text', true, $figure))
+						->addClass('apm-map-node-stats')
+						->addClass($hot ? 'apm-map-hot' : null)
+						->setAttribute('y', sprintf('%.1f', $r + 29))
+						->setAttribute('text-anchor', 'middle')
+				);
 
-			$node_layer->addItem(self::link(self::nodeUrl($node), $node['name'], $group));
+			$node_layer->addItem(self::link(self::nodeUrl($node, $ctx), $node['name'], $group));
 		}
 
 		$svg
@@ -666,6 +820,166 @@ class ServiceMap {
 	}
 
 	/**
+	 * Shape of a node by what it is: a circle for a service, a cylinder for a database, a capsule for a queue, a
+	 * diamond for something outside, and a glyph inside the circle for the users and for a browser.
+	 */
+	private static function shape(array $node, float $r, string $health, float $error_rate, ?float $p95,
+			array $thresholds): array {
+		$f = static fn(float $value): string => sprintf('%.1f', $value);
+		$kind = $node['kind'];
+
+		switch ($kind) {
+			case 'database':
+				$w = $r * 0.9;
+				$h = $r;
+				$e = $r * 0.32;
+
+				return [
+					(new CTag('path', true))
+						->addClass('apm-map-shape')
+						->setAttribute('d', 'M'.$f(-$w).','.$f(-$h + $e).' A'.$f($w).','.$f($e).' 0 0 1 '.$f($w).','.$f(-$h + $e)
+							.' V'.$f($h - $e).' A'.$f($w).','.$f($e).' 0 0 1 '.$f(-$w).','.$f($h - $e).' Z'
+						),
+					(new CTag('path', true))
+						->addClass('apm-map-shape-detail')
+						->setAttribute('d', 'M'.$f(-$w).','.$f(-$h + $e).' A'.$f($w).','.$f($e).' 0 0 0 '.$f($w).','.$f(-$h + $e))
+				];
+
+			case 'queue':
+				return [
+					(new CTag('rect', true))
+						->addClass('apm-map-shape')
+						->setAttribute('x', $f(-$r * 1.25))
+						->setAttribute('y', $f(-$r * 0.7))
+						->setAttribute('width', $f($r * 2.5))
+						->setAttribute('height', $f($r * 1.4))
+						->setAttribute('rx', $f($r * 0.7)),
+					(new CTag('path', true))
+						->addClass('apm-map-shape-detail')
+						->setAttribute('d', 'M'.$f(-$r * 0.4).','.$f(-$r * 0.7).' V'.$f($r * 0.7)
+							.' M'.$f($r * 0.4).','.$f(-$r * 0.7).' V'.$f($r * 0.7)
+						)
+				];
+
+			case 'external':
+				return [
+					(new CTag('path', true))
+						->addClass('apm-map-shape')
+						->setAttribute('d', 'M0,'.$f(-$r).' L'.$f($r).',0 L0,'.$f($r).' L'.$f(-$r).',0 Z')
+				];
+
+			default:
+				$language = self::language($node);
+
+				// The ring: all of it takes the color of the health when the service is slow or has open problems;
+				// when what is wrong is errors, it stays green and the share that fails now is a red arc from the top.
+				$slow = self::health(0.0, $p95, $thresholds) !== 'ok';
+				$problems = ($node['problems']['severity'] ?? -1) >= self::SEVERITY_WARNING;
+				$ring = $kind === 'users' ? 'neutral' : ($slow || $problems ? $health : 'ok');
+				$arc = $kind === 'users' ? null : self::errorArc($error_rate, $r);
+
+				$inside = $kind === 'users'
+					? (new CTag('path', true))
+						->addClass('apm-map-glyph-solid')
+						->setAttribute('d', 'M0,-9 a4.5,4.5 0 1 1 0,9 a4.5,4.5 0 0 1 0,-9 z M-9,10 c0,-5 4,-8 9,-8 s9,3 9,8 z')
+					: ($language['mono'] !== ''
+						? (new CTag('text', true, $language['mono']))
+							->addClass('apm-map-mono')
+							->setAttribute('text-anchor', 'middle')
+							->setAttribute('dominant-baseline', 'central')
+							->setAttribute('font-size', $f(self::monoSize($language['mono'], $r)))
+						: (new CTag('path', true))
+							->addClass('apm-map-shape-detail')
+							->setAttribute('d', $language['key'] === 'webjs'
+								? 'M-8,-7 h16 v11 h-16 z M-8,-3.5 h16 M-4,8 h8'
+								// No known technology (a proxy, a web server): a plain stack.
+								: 'M-7,-6 h14 v4 h-14 z M-7,-1 h14 v4 h-14 z M-7,4 h14 v4 h-14 z'
+							));
+
+				return [
+					// Opaque under the tint: a line that passes behind a node does not show through it.
+					(new CTag('circle', true))->addClass('apm-map-back')->setAttribute('r', $f($r)),
+					(new CTag('circle', true))
+						->addClass('apm-map-fill')
+						->addClass('apm-map-lang-'.($kind === 'users' ? 'users' : $language['key']))
+						->setAttribute('r', $f($r)),
+					(new CTag('circle', true))
+						->addClass('apm-map-shape')
+						->addClass('apm-map-ring')
+						->addClass('apm-map-ring-'.$ring)
+						->setAttribute('r', $f($r)),
+					$arc !== null
+						? (new CTag('circle', true))
+							->addClass('apm-map-arc')
+							->setAttribute('r', $f($r))
+							->setAttribute('transform', 'rotate(-90)')
+							->setAttribute('stroke-dasharray', $f($arc[0]).' '.$f($arc[1]))
+						: null,
+					$inside
+				];
+		}
+	}
+
+	// Technologies (telemetry.sdk.language): the letters drawn inside the node and the name for the tooltip. Letters,
+	// not logos: they read at any size and belong to nobody.
+	private const LANGUAGES = [
+		'go' => ['Go', 'Go'],
+		'java' => ['Java', 'Java'],
+		'dotnet' => ['.NET', '.NET'],
+		'nodejs' => ['JS', 'Node.js'],
+		'python' => ['Py', 'Python'],
+		'php' => ['PHP', 'PHP'],
+		'ruby' => ['Rb', 'Ruby'],
+		'rust' => ['Rs', 'Rust'],
+		'cpp' => ['C++', 'C++'],
+		'erlang' => ['Ex', 'Erlang / Elixir'],
+		'swift' => ['Sw', 'Swift'],
+		'webjs' => ['', 'Browser']
+	];
+
+	/**
+	 * Technology of a node.
+	 *
+	 * @return array  ['key' => string (a known technology or 'other'), 'mono' => string ('' = drawn as a glyph),
+	 *                'name' => string ('' for an unknown one)]
+	 */
+	public static function language(array $node): array {
+		$key = ($node['browser'] ?? false) ? 'webjs' : strtolower((string) ($node['language'] ?? ''));
+
+		if ($node['kind'] !== 'service' || !array_key_exists($key, self::LANGUAGES)) {
+			return ['key' => 'other', 'mono' => '', 'name' => ''];
+		}
+
+		return ['key' => $key, 'mono' => self::LANGUAGES[$key][0], 'name' => self::LANGUAGES[$key][1]];
+	}
+
+	/**
+	 * The share of the requests that fail, as an arc of the ring: [length of the arc, length of the rest], for
+	 * stroke-dasharray. A share above zero is always visible; null when nothing fails.
+	 */
+	public static function errorArc(float $error_rate, float $radius): ?array {
+		if ($error_rate <= 0 || $radius <= 0) {
+			return null;
+		}
+
+		$circumference = 2 * M_PI * $radius;
+		$length = min($circumference, max(self::ARC_MIN, $circumference * min(100, $error_rate) / 100));
+
+		return [round($length, 1), round($circumference - $length, 1)];
+	}
+
+	// Shortest arc drawn for a share of errors above zero, px.
+	private const ARC_MIN = 5;
+
+	/**
+	 * Size of the letters inside a node: as large as its circle allows for that many letters.
+	 */
+	private static function monoSize(string $mono, float $r): float {
+		return round(min(15, $r * 1.55 / max(2, mb_strlen($mono) * 0.62 + 0.6)), 1);
+	}
+
+	/**
+	 * Overview page looking at one service	/**
 	 * Overview page looking at one service, on the tab that explains where its time goes. The service travels in the
 	 * URL and is not stored: it lasts as long as that page view.
 	 */
@@ -757,7 +1071,7 @@ class ServiceMap {
 			$item('bad', sprintf(I18n::t('Problem: errors ≥ %s %% or p95 ≥ %s'), $thresholds['error_high'],
 				ApmStats::formatDuration($thresholds['latency_high'])
 			)),
-			new CSpan(I18n::t('Thickness = share of the traffic · moving dots = live flow (faster = more calls). Hover a service to follow its path; click it to see where its time goes.'))
+			new CSpan(I18n::t('Size = traffic · inside, the technology · ring = health now, with the share of the requests that fail as a red arc · line = calls, colored only when something is wrong. Point at a service to follow its calls; click it to keep only its path and open its details.'))
 		]))->addClass('apm-map-legend');
 	}
 
@@ -771,8 +1085,30 @@ class ServiceMap {
 		return (new CTag('a', true, $content))->setAttribute('href', $url->getUrl());
 	}
 
-	private static function nodeUrl(array $node): ?CUrl {
-		return $node['kind'] === 'service' ? self::getServiceUrl($node['name']) : null;
+	/**
+	 * A service links to its page; the page script opens the service panel instead (data-apm-service).
+	 */
+	private static function nodeUrl(array $node, array $ctx = []): ?CUrl {
+		return $node['kind'] === 'service' ? self::getServicePageUrl($node['name'], $ctx) : null;
+	}
+
+	/**
+	 * Page of one service (apm.service), in the period of the context when it has one.
+	 */
+	public static function getServicePageUrl(string $service, array $ctx = [], string $endpoint = ''): CUrl {
+		$url = (new CUrl('zabbix.php'))
+			->setArgument('action', 'apm.service')
+			->setArgument('service', $service);
+
+		if ($endpoint !== '') {
+			$url->setArgument('endpoint', $endpoint);
+		}
+
+		if (($ctx['application'] ?? null) !== null) {
+			$url->setArgument('app', $ctx['application']);
+		}
+
+		return $url;
 	}
 
 	/**
@@ -855,11 +1191,11 @@ class ServiceMap {
 		return $requests > 0 ? $errors / $requests * 100 : 0.0;
 	}
 
-	private static function formatRate(float $rpm): string {
+	public static function formatRate(float $rpm): string {
 		return $rpm >= 10 ? (string) round($rpm) : sprintf('%.1f', $rpm);
 	}
 
-	private static function formatCount(int $value): string {
+	public static function formatCount(int $value): string {
 		return number_format($value, 0, '.', ' ');
 	}
 }

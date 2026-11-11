@@ -67,6 +67,7 @@ class OverviewData extends CController {
 			'endpoint_service' => $filter['endpoint_service'],
 			'apdex_ms' => $filter['apdex_ms'],
 			'focus' => $filter['service'],
+			'application' => $filter['application'],
 			'transient' => $filter['focus'] !== '',
 			'recent_min' => $filter['recent_min'],
 			'long_s' => $filter['long_s'],

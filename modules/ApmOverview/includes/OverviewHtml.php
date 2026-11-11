@@ -308,59 +308,80 @@ class OverviewHtml {
 	 * State of the system now, above the map: entry traffic, errors, the slowest service, health counts and what needs
 	 * attention (ServiceMap::summary()).
 	 */
-	private static function mapSummary(array $summary): CDiv {
-		$card = static fn(string $label, $value, string $note, ?string $class = null): CDiv => (new CDiv([
-			(new CDiv($label))->addClass(ZBX_STYLE_GREY),
-			(new CDiv($value))->addClass('apm-map-kpi-value')->addClass($class),
-			(new CDiv($note))->addClass(ZBX_STYLE_GREY)
-		]))->addClass('apm-map-kpi');
-
-		$error_class = $summary['error_rate'] >= self::ERROR_RATE_HIGH
-			? 'apm-map-kpi-bad'
-			: ($summary['error_rate'] >= self::ERROR_RATE_WARNING ? 'apm-map-kpi-warn' : null);
-
+	private static function mapSummary(array $summary, ?array $app_problems = null): CDiv {
 		$health = $summary['health'];
-		$cards = (new CDiv([
-			$card(I18n::t('Incoming traffic'), self::formatRate($summary['rpm']).'/min',
-				sprintf(I18n::t('%s requests in the period'), self::formatCount($summary['requests']))
-			),
-			$card(I18n::t('Error rate'), sprintf('%.2f %%', $summary['error_rate']), I18n::t('of the incoming requests'),
-				$error_class
-			),
-			$card(I18n::t('Slowest service'),
-				$summary['slowest'] !== null ? 'p95 '.ServiceMap::shortDuration($summary['slowest']['p95']) : '—',
-				$summary['slowest'] !== null ? $summary['slowest']['name'] : ''
-			),
-			$card(I18n::t('Services'), [
-				(new CSpan($health['ok']))->addClass('apm-map-kpi-ok'), ' / ',
-				(new CSpan($health['warn']))->addClass('apm-map-kpi-warn'), ' / ',
-				(new CSpan($health['bad']))->addClass('apm-map-kpi-bad')
-			], I18n::t('healthy / warning / problem'))
-		]))->addClass('apm-map-kpis');
 
-		$attention = (new CTag('ul', true))->addClass('apm-map-attention');
+		$line = (new CDiv([
+			new CTag('strong', true, self::formatRate($summary['rpm']).'/min'),
+			' '.I18n::t('from users').' · ',
+			(new CTag('strong', true, sprintf('%.2f %%', $summary['error_rate'])))->addClass(
+				$summary['error_rate'] >= self::ERROR_RATE_HIGH
+					? 'apm-map-kpi-bad'
+					: ($summary['error_rate'] >= self::ERROR_RATE_WARNING ? 'apm-map-kpi-warn' : null)
+			),
+			' '.I18n::t('errors').' · ',
+			sprintf(I18n::t('%d services healthy'), $health['ok']),
+			$health['warn'] > 0
+				? [', ', (new CSpan(sprintf(I18n::t('%d with a warning'), $health['warn'])))->addClass('apm-map-kpi-warn')]
+				: null,
+			$health['bad'] > 0
+				? [', ', (new CSpan(sprintf(I18n::t('%d with a problem'), $health['bad'])))->addClass('apm-map-kpi-bad')]
+				: null,
+			$summary['slowest'] !== null
+				? ' · '.sprintf(I18n::t('slowest: %s (p95 %s)'), $summary['slowest']['name'],
+					ServiceMap::shortDuration($summary['slowest']['p95'])
+				)
+				: null,
+			$app_problems !== null && $app_problems['problems']['count'] > 0
+				? [' · ', new CLink(
+					sprintf(I18n::t('%d open problems in Zabbix (%s)'), $app_problems['problems']['count'],
+						$app_problems['problems']['worst']
+					),
+					(new CUrl('zabbix.php'))
+						->setArgument('action', 'problem.view')
+						->setArgument('hostids', [$app_problems['host']['hostid']])
+						->setArgument('filter_set', 1)
+				)]
+				: null
+		]))->addClass('apm-map-line-summary');
 
-		foreach ($summary['attention'] as $item) {
-			$attention->addItem(new CTag('li', true, [
-				(new CSpan())->addClass('apm-map-dot')->addClass('apm-map-'.$item['severity']),
-				$item['service'] !== null
-					? new CLink($item['label'], ServiceMap::getServiceUrl($item['service']))
-					: new CSpan($item['label']),
-				(new CSpan(': '.$item['reason']))->addClass(ZBX_STYLE_GREY)
-			]));
+		$attention = null;
+
+		if ($summary['attention']) {
+			$attention = (new CTag('ul', true))->addClass('apm-map-attention');
+
+			foreach ($summary['attention'] as $item) {
+				$attention->addItem(new CTag('li', true, [
+					(new CSpan())->addClass('apm-map-dot')->addClass('apm-map-'.$item['severity']),
+					$item['service'] !== null
+						? new CLink($item['label'], ServiceMap::getServicePageUrl($item['service']))
+						: new CSpan($item['label']),
+					(new CSpan(' '.$item['reason']))->addClass(ZBX_STYLE_GREY)
+				]));
+			}
 		}
 
-		if (!$summary['attention']) {
-			$attention->addItem(new CTag('li', true, [
-				(new CSpan())->addClass('apm-map-dot')->addClass('apm-map-ok'),
-				I18n::t('Everything is healthy: no service or connection over the thresholds.')
-			]));
-		}
+		return (new CDiv([$line, $attention]))->addClass('apm-map-summary');
+	}
+
+	/**
+	 * Controls of the map, applied in the browser (CApmServiceMapInteraction): nothing is asked of the server.
+	 */
+	private static function mapTools(): CDiv {
+		$check = static fn(string $attribute, string $label): CTag => new CTag('label', true, [
+			(new CTag('input', false))->setAttribute('type', 'checkbox')->setAttribute($attribute, ''),
+			' '.$label
+		]);
 
 		return (new CDiv([
-			$cards,
-			(new CDiv([new CTag('h5', true, I18n::t('Needs attention')), $attention]))->addClass('apm-map-attention-box')
-		]))->addClass('apm-map-summary');
+			(new CTag('input', false))
+				->setAttribute('type', 'search')
+				->setAttribute('data-apm-map-search', '')
+				->setAttribute('placeholder', I18n::t('Find a service'))
+				->setAttribute('aria-label', I18n::t('Find a service')),
+			$check('data-apm-map-problems', I18n::t('Only what has a problem')),
+			$check('data-apm-map-dependencies', I18n::t('Hide databases, queues and external services'))
+		]))->addClass('apm-map-tools');
 	}
 
 	/**
@@ -368,6 +389,13 @@ class OverviewHtml {
 	 */
 	public static function map(array $data, array $ctx): CDiv {
 		$graph = ServiceMap::build($data['services'], $data['calls'], $data['call_minutes']);
+
+		// Open Zabbix problems of each service (tag service = name): a mark on its node and part of its health.
+		foreach ($data['problems'] ?? [] as $service => $problems) {
+			if (array_key_exists('svc:'.$service, $graph['nodes'])) {
+				$graph['nodes']['svc:'.$service]['problems'] = $problems;
+			}
+		}
 
 		$table = (new CTableInfo())
 			->setHeader([I18n::t('Source'), I18n::t('Destination'), I18n::t('Type'), I18n::t('Calls'), I18n::t('Calls/min'), I18n::t('Errors'), 'p95'])
@@ -391,8 +419,8 @@ class OverviewHtml {
 			$error_rate = $edge['calls'] > 0 ? $edge['errors'] / $edge['calls'] * 100 : 0;
 
 			$table->addRow([
-				$from['kind'] === 'service' ? new CLink($from['name'], ServiceMap::getServiceUrl($from['name'])) : $from['name'],
-				$to['kind'] === 'service' ? new CLink($to['name'], ServiceMap::getServiceUrl($to['name'])) : $to['name'],
+				$from['kind'] === 'service' ? new CLink($from['name'], ServiceMap::getServicePageUrl($from['name'], $ctx)) : $from['name'],
+				$to['kind'] === 'service' ? new CLink($to['name'], ServiceMap::getServicePageUrl($to['name'], $ctx)) : $to['name'],
 				match ($to['kind']) {
 					'database' => I18n::t('Database'),
 					'queue' => I18n::t('Queue'),
@@ -416,7 +444,8 @@ class OverviewHtml {
 				I18n::t(' and its connections. The rest of the application is dimmed. '),
 				new CLink(I18n::t('Clear filter'), self::getClearFilterUrl(self::TAB_MAP, $ctx['transient'] ?? false))
 			]))->addClass('apm-overview-hint') : null,
-			$graph['nodes'] ? self::mapSummary(ServiceMap::summary($graph)) : null,
+			$graph['nodes'] ? self::mapSummary(ServiceMap::summary($graph), $data['app_problems'] ?? null) : null,
+			$graph['nodes'] ? self::mapTools() : null,
 			ServiceMap::render($graph, $ctx),
 			$ctx['join_capped'] ? self::hint(sprintf(
 				I18n::t('Calls between services and to their dependencies are calculated over the last %d h of the period.'),
@@ -467,10 +496,13 @@ class OverviewHtml {
 			$series = $data['series'][$service['service']] ?? null;
 
 			$table->addRow([
-				(new CCol(
-					(new CLink($service['service'], self::getEndpointsUrl($service['service'])))
-						->setTitle(I18n::t('Show the endpoints of this service'))
-				))->addClass(ZBX_STYLE_WORDBREAK),
+				(new CCol([
+					(new CLink($service['service'], ServiceMap::getServicePageUrl($service['service'], $ctx)))
+						->setTitle(I18n::t('Open the page of this service')),
+					($service['browser'] ?? false)
+						? [' ', (new CSpan(I18n::t('browser')))->addClass('apm-pill apm-pill-info')]
+						: null
+				]))->addClass(ZBX_STYLE_WORDBREAK),
 				self::formatCount($service['requests']),
 				sprintf('%.2f', $service['rpm']),
 				$series === null ? '' : self::sparkline($series['requests'], 'apm-spark-requests',
@@ -492,6 +524,8 @@ class OverviewHtml {
 				),
 				ApmStats::formatDuration($service['p99']),
 				(new CCol([
+					new CLink('Endpoints', self::getEndpointsUrl($service['service'])),
+					' · ',
 					new CLink(I18n::t('Traces'), self::getTracesUrl($ctx, $service['service'])),
 					' · ',
 					in_array('logs', ApmAccess::signals(), true)
@@ -533,7 +567,11 @@ class OverviewHtml {
 					(new CLink($endpoint['service'], self::getEndpointsUrl($endpoint['service'])))
 						->setTitle(I18n::t('Show only the endpoints of this service'))
 				))->addClass(ZBX_STYLE_WORDBREAK),
-				(new CCol(self::endpointLabel($endpoint['endpoint'], $endpoint['codes'])))->addClass(ZBX_STYLE_WORDBREAK),
+				(new CCol(
+					(new CLink(self::endpointLabel($endpoint['endpoint'], $endpoint['codes']),
+						ServiceMap::getServicePageUrl($endpoint['service'], $ctx, $endpoint['endpoint'])
+					))->setTitle(I18n::t('Open the page of this endpoint'))
+				))->addClass(ZBX_STYLE_WORDBREAK),
 				self::formatCount($endpoint['requests']),
 				sprintf('%.2f', $endpoint['rpm']),
 				$endpoint['errors'] > 0
@@ -617,7 +655,13 @@ class OverviewHtml {
 
 			$table->addRow(
 				(new CRow([
-					(new CCol(self::statePill($error['state'])))->addClass(ZBX_STYLE_NOWRAP),
+					(new CCol([
+						self::statePill($error['state']),
+						// The version that brought it, or brought it back.
+						($error['version'] ?? '') !== '' && $error['state'] !== ApmStats::STATE_RESOLVED
+							? (new CDiv(sprintf(I18n::t('since %s'), $error['version'])))->addClass(ZBX_STYLE_GREY)
+							: null
+					]))->addClass(ZBX_STYLE_NOWRAP),
 					(new CCol($first))->addClass(ZBX_STYLE_WORDBREAK),
 					(new CCol(self::endpointLabel($error['endpoint'], $error['codes'])))->addClass(ZBX_STYLE_WORDBREAK),
 					(new CCol([
@@ -1425,7 +1469,7 @@ class OverviewHtml {
 	/**
 	 * Waterfall of one trace: spans in tree order, bars placed on the trace's time line.
 	 */
-	private static function waterfall(array $trace, bool $open): CTag {
+	public static function waterfall(array $trace, bool $open): CTag {
 		$spans = $trace['spans'];
 		$rows = self::spanRows($spans, (float) $trace['duration']);
 
@@ -1459,7 +1503,7 @@ class OverviewHtml {
 	/**
 	 * Latency histogram of one service, bars colored by Apdex zone, p50 and p95 marked.
 	 */
-	private static function histogram(string $service, array $buckets, int $threshold_ns): CDiv {
+	public static function histogram(string $service, array $buckets, int $threshold_ns): CDiv {
 		$total = array_sum($buckets);
 		$max = max(1, max($buckets));
 		$labels = ['≤1 ms', '≤2 ms', '≤4 ms', '≤8 ms', '≤16 ms', '≤32 ms', '≤64 ms', '≤128 ms', '≤256 ms', '≤512 ms',
@@ -1566,7 +1610,7 @@ class OverviewHtml {
 	/**
 	 * Span name of a server span; a bare HTTP method means the router matched no route (404 and the like).
 	 */
-	private static function endpointLabel(string $endpoint, array $codes): array|string {
+	public static function endpointLabel(string $endpoint, array $codes): array|string {
 		if (preg_match('/^[A-Z]+$/', $endpoint) !== 1) {
 			return $endpoint;
 		}
@@ -1579,7 +1623,7 @@ class OverviewHtml {
 		];
 	}
 
-	private static function errorRatePill(float $error_rate): CSpan {
+	public static function errorRatePill(float $error_rate): CSpan {
 		$pill = (new CSpan(sprintf('%.2f %%', $error_rate)))->addClass('apm-pill');
 
 		if ($error_rate >= self::ERROR_RATE_HIGH) {
@@ -1658,7 +1702,7 @@ class OverviewHtml {
 		return zbx_date2str(date('Ymd', $clock) === date('Ymd') ? 'H:i:s' : DATE_TIME_FORMAT_SECONDS, $clock);
 	}
 
-	private static function formatRate(float $rpm): string {
+	public static function formatRate(float $rpm): string {
 		return $rpm >= 10 ? (string) round($rpm) : sprintf('%.1f', $rpm);
 	}
 

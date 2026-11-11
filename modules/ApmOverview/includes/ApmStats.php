@@ -264,7 +264,7 @@ class ApmStats {
 	 *
 	 * @param string $service  Service name pattern, "*" is a wildcard. Empty string matches all services.
 	 *
-	 * @return array  List of ['service', 'requests', 'errors', 'error_rate', 'rpm', 'p50', 'p95', 'p99', 'browser',
+	 * @return array  List of ['service', 'requests', 'errors', 'error_rate', 'rpm', 'p50', 'p95', 'p99', 'browser', 'language',
 	 *                'user' => ['requests', 'errors'], 'recent' => ['requests', 'errors', 'error_rate', 'p95']],
 	 *                durations in nanoseconds. "user": the requests that came from outside (see USER_ENTRY); "recent":
 	 *                the last minutes of the period (setRecent()).
@@ -281,7 +281,9 @@ class ApmStats {
 				' countIf('.$recent.') AS recent_requests,'.
 				' countIf('.$recent.' AND StatusCode=\'Error\') AS recent_errors,'.
 				' quantileIf(0.95)(Duration,'.$recent.' AND '.$latency.') AS recent_p95,'.
-				' max('.self::BROWSER.') AS browser'.
+				' max('.self::BROWSER.') AS browser,'.
+				' anyIf(ResourceAttributes[\'telemetry.sdk.language\'],ResourceAttributes[\'telemetry.sdk.language\']!=\'\')'.
+					' AS language'.
 			' FROM otel_traces'.
 			' WHERE '.$this->period().' AND '.self::ENTRY.self::serviceCondition($service).
 			' GROUP BY service'.
@@ -299,6 +301,7 @@ class ApmStats {
 
 			$services[] = ['service' => $row['service']] + self::makeRedRow($row, $minutes) + [
 				'browser' => (bool) $row['browser'],
+				'language' => (string) $row['language'],
 				'user' => ['requests' => (int) $row['user_requests'], 'errors' => (int) $row['user_errors']],
 				'recent' => [
 					'requests' => $recent_requests,
@@ -509,11 +512,14 @@ class ApmStats {
 				' arraySort(groupUniqArrayIf(5)(code,code!=\'\')) AS codes, argMax(traceid,ts) AS traceid,'.
 				' uniqExactIf(b.session,b.session!=\'\') AS sessions, anyIf(b.page,b.page!=\'\') AS page,'.
 				' max(is_browser) AS browser,'.
+				' argMinIf(version,ts,ts>=toDateTime64({recent_from:Int32},9)) AS recent_version,'.
+				' argMaxIf(version,ts,ts<toDateTime64({recent_from:Int32},9)) AS before_version,'.
 				' sumMapIf([toUInt16(intDiv((toUnixTimestamp(ts)-{period_start:Int32})*'.self::ERROR_SERIES.','.$length.'))],'.
 					'[toUInt64(1)],ts>=toDateTime64({period_start:Int32},9)) AS series'.
 			' FROM ('.
 				'SELECT ServiceName AS service, SpanName AS endpoint, Timestamp AS ts, TraceId AS traceid,'.
 					' '.self::HTTP_STATUS.' AS code, '.self::BROWSER.' AS is_browser,'.
+					' ResourceAttributes[\'service.version\'] AS version,'.
 					' if('.$exception.'[\'exception.type\']!=\'\','.$exception.'[\'exception.type\'],'.
 						'SpanAttributes[\'exception.type\']) AS type,'.
 					' substringUTF8(replaceRegexpAll('.$message.',{volatile:String},\'?\'),1,'.
@@ -571,6 +577,10 @@ class ApmStats {
 				'sessions' => (int) $row['sessions'],
 				'page' => (string) $row['page'],
 				'browser' => (bool) $row['browser'],
+				// The version that brought the error (back): the one it is seen in now, when it differs from before.
+				'version' => (string) $row['recent_version'] !== (string) $row['before_version']
+					? (string) $row['recent_version']
+					: '',
 				'series' => $series
 			];
 		}
@@ -751,13 +761,14 @@ class ApmStats {
 	 *                'browser'], start relative to the request start, nanoseconds.
 	 */
 	public function getSlowTraces(int $time_from, int $time_till, string $service = '', int $limit = 8,
-			int $span_limit = 40): array {
+			int $span_limit = 40, string $endpoint = ''): array {
 		$sql = 'SELECT TraceId AS traceid, SpanId AS spanid, ServiceName AS service, SpanName AS endpoint,'.
 				' toUnixTimestamp(Timestamp) AS clock, toUnixTimestamp64Nano(Timestamp) AS start,'.
 				' Duration AS duration, StatusCode=\'Error\' AS error'.
 			' FROM otel_traces'.
 			' WHERE '.$this->period().' AND '.($service !== '' ? self::ENTRY : 'ParentSpanId=\'\'').
 				' AND '.$this->latency().self::serviceCondition($service).
+				($endpoint !== '' ? ' AND SpanName={endpoint:String}' : '').
 			' ORDER BY Duration DESC'.
 			' LIMIT 1 BY TraceId'.
 			' LIMIT '.$limit.
@@ -765,7 +776,8 @@ class ApmStats {
 
 		$traces = [];
 
-		foreach ($this->fetch($sql, $time_from, $time_till, $service) as $row) {
+		foreach ($this->fetch($sql, $time_from, $time_till, $service,
+				$endpoint !== '' ? ['endpoint' => ['String', $endpoint]] : []) as $row) {
 			$traces[$row['traceid']] = [
 				'traceid' => (string) $row['traceid'],
 				'spanid' => (string) $row['spanid'],
@@ -1015,18 +1027,21 @@ class ApmStats {
 	 *
 	 * @return array  [service => int[HISTOGRAM_BUCKETS]], busiest service first.
 	 */
-	public function getLatencyHistogram(int $time_from, int $time_till, string $service = '', int $limit = 4): array {
+	public function getLatencyHistogram(int $time_from, int $time_till, string $service = '', int $limit = 4,
+			string $endpoint = ''): array {
 		$sql = 'SELECT ServiceName AS service,'.
 				' toUInt8(least('.(self::HISTOGRAM_BUCKETS - 1).',greatest(0,ceil(log2(greatest(Duration,1)/1000000)))))'.
 					' AS bucket,'.
 				' count() AS requests'.
 			' FROM otel_traces'.
 			' WHERE '.$this->period().' AND '.self::ENTRY.' AND '.$this->latency().self::serviceCondition($service).
+				($endpoint !== '' ? ' AND SpanName={endpoint:String}' : '').
 			' GROUP BY service, bucket';
 
 		$histograms = [];
 
-		foreach ($this->fetch($sql, $time_from, $time_till, $service) as $row) {
+		foreach ($this->fetch($sql, $time_from, $time_till, $service,
+				$endpoint !== '' ? ['endpoint' => ['String', $endpoint]] : []) as $row) {
 			$histograms[$row['service']] ??= array_fill(0, self::HISTOGRAM_BUCKETS, 0);
 			$histograms[$row['service']][(int) $row['bucket']] = (int) $row['requests'];
 		}
@@ -1091,6 +1106,424 @@ class ApmStats {
 		}
 
 		return $result;
+	}
+
+	// Resource attributes worth comparing between slow or failed requests and the rest (span attributes all are).
+	private const TAG_RESOURCE_KEYS = ['service.version', 'host.name', 'container.id', 'k8s.pod.name', 'k8s.node.name',
+		'k8s.namespace.name', 'deployment.environment.name', 'deployment.environment', 'service.instance.id',
+		'cloud.region', 'cloud.availability_zone'
+	];
+
+	// Requests read for the tag analysis and the span summary: enough to compare, light on a small ClickHouse.
+	public const SAMPLE_REQUESTS = 50000;
+	public const SAMPLE_TRACES = 2000;
+
+	// An attribute with more values than this identifies requests (an id, a URL), it does not explain them.
+	public const TAG_MAX_VALUES = 30;
+	public const TAG_MIN_REQUESTS = 5;
+
+	public const TIMESERIES_BUCKETS = 60;
+
+	/**
+	 * What a service is: language, versions, the hosts it runs on, whether it is a browser.
+	 *
+	 * @return array  ['language', 'versions' => string[] (latest first), 'hosts' => string[], 'browser' => bool,
+	 *                'application']
+	 */
+	public function getServiceInfo(int $time_from, int $time_till, string $service): array {
+		$sql = 'SELECT any(ResourceAttributes[\'telemetry.sdk.language\']) AS language,'.
+				' groupUniqArrayIf(8)(ResourceAttributes[\'host.name\'],ResourceAttributes[\'host.name\']!=\'\') AS hosts,'.
+				' any(ResourceAttributes[\'service.namespace\']) AS application, max('.self::BROWSER.') AS browser'.
+			' FROM otel_traces'.
+			' WHERE '.$this->period().' AND ServiceName={exact:String}';
+
+		$row = $this->fetch($sql, $time_from, $time_till, '', ['exact' => ['String', $service]])[0] ?? [];
+
+		return [
+			'language' => (string) ($row['language'] ?? ''),
+			'hosts' => self::nonEmpty($row['hosts'] ?? []),
+			'application' => (string) ($row['application'] ?? ''),
+			'browser' => (bool) ($row['browser'] ?? false)
+		];
+	}
+
+	/**
+	 * Requests, errors and latency of a service (or of one of its endpoints) over the period, in up to
+	 * TIMESERIES_BUCKETS steps, with the same hours of the day before and of the week before to compare.
+	 *
+	 * @return array  ['step' => int (s), 'times' => int[], 'now' => series, 'day' => series, 'week' => series],
+	 *                series ['requests' => int[], 'errors' => int[], 'p50' => float[], 'p95' => float[]] (ns); 'day' and
+	 *                'week' are null when ClickHouse holds nothing that old.
+	 */
+	public function getTimeseries(int $time_from, int $time_till, string $service, string $endpoint = ''): array {
+		$step = self::timeseriesStep($time_from, $time_till);
+		$first = intdiv($time_from, $step) * $step;
+		$times = range($first, max($first, $time_till - 1), $step);
+		$shifts = ['now' => 0, 'day' => SEC_PER_DAY, 'week' => 7 * SEC_PER_DAY];
+
+		$windows = [];
+		$params = ['exact' => ['String', $service], 'first' => ['Int32', $first], 'step' => ['Int32', $step]];
+
+		foreach (array_values($shifts) as $i => $shift) {
+			$windows[] = '(Timestamp>=toDateTime64({from'.$i.':Int32},9) AND Timestamp<toDateTime64({till'.$i.':Int32},9))';
+			$params['from'.$i] = ['Int32', $first - $shift];
+			$params['till'.$i] = ['Int32', $time_till - $shift];
+		}
+
+		if ($endpoint !== '') {
+			$params['endpoint'] = ['String', $endpoint];
+		}
+
+		$sql = 'SELECT multiIf('.$windows[0].',0,'.$windows[1].',1,2) AS w,'.
+				' intDiv(toUnixTimestamp(Timestamp)+multiIf(w=0,0,w=1,'.SEC_PER_DAY.','.(7 * SEC_PER_DAY).')-{first:Int32},'.
+					'{step:Int32}) AS bucket,'.
+				' count() AS requests, countIf(StatusCode=\'Error\') AS errors,'.
+				' quantilesIf(0.5,0.95)(Duration,'.$this->latency().') AS q'.
+			' FROM otel_traces'.
+			' WHERE ('.implode(' OR ', $windows).')'.$this->applicationCondition().
+				' AND '.self::ENTRY.' AND ServiceName={exact:String}'.
+				($endpoint !== '' ? ' AND SpanName={endpoint:String}' : '').
+			' GROUP BY w, bucket'.
+			self::LOW_MEMORY;
+
+		$empty = ['requests' => array_fill(0, count($times), 0), 'errors' => array_fill(0, count($times), 0),
+			'p50' => array_fill(0, count($times), 0.0), 'p95' => array_fill(0, count($times), 0.0)
+		];
+		$result = ['step' => $step, 'times' => $times, 'now' => $empty, 'day' => null, 'week' => null];
+		$names = array_keys($shifts);
+
+		foreach (self::rows($this->db, $sql, $params + $this->applicationParams()) as $row) {
+			$name = $names[(int) $row['w']];
+			$bucket = (int) $row['bucket'];
+
+			if ($bucket < 0 || $bucket >= count($times)) {
+				continue;
+			}
+
+			$result[$name] ??= $empty;
+			$result[$name]['requests'][$bucket] = (int) $row['requests'];
+			$result[$name]['errors'][$bucket] = (int) $row['errors'];
+			$result[$name]['p50'][$bucket] = self::finite($row['q'][0] ?? null);
+			$result[$name]['p95'][$bucket] = self::finite($row['q'][1] ?? null);
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Step of a time series: whole minutes, so that the period fits in TIMESERIES_BUCKETS points.
+	 */
+	public static function timeseriesStep(int $time_from, int $time_till): int {
+		return max(SEC_PER_MIN, (int) ceil(max(1, $time_till - $time_from) / self::TIMESERIES_BUCKETS / SEC_PER_MIN) * SEC_PER_MIN);
+	}
+
+	/**
+	 * What the requests of an endpoint are made of: per operation below them (any service), how many spans a request
+	 * has of it, in what share of the requests it appears, its average duration and its share of the time. From a
+	 * sample of the requests of the last hours of the period.
+	 *
+	 * @return array  List of ['service', 'name', 'kind', 'per_request', 'share_requests', 'avg', 'share_time'], the
+	 *                ones that take most time first.
+	 */
+	public function getSpanSummary(int $time_from, int $time_till, string $service, string $endpoint, int $limit = 25): array {
+		[$time_from, $time_till] = self::joinWindow($time_from, $time_till);
+
+		$sql = 'SELECT s.ServiceName AS service, s.SpanName AS name, any(s.SpanKind) AS kind, count() AS spans,'.
+				' uniqExact(s.TraceId) AS traces, avg(s.Duration) AS avg, sum(s.Duration) AS total,'.
+				' any(e.requests) AS requests, any(e.time) AS time'.
+			' FROM otel_traces AS s'.
+			' INNER JOIN ('.
+				'SELECT TraceId, min(Timestamp) AS ts, max(Timestamp+toIntervalNanosecond(Duration)) AS te,'.
+					' count() OVER () AS requests, sum(sum(Duration)) OVER () AS time'.
+				' FROM otel_traces'.
+				' WHERE '.$this->period().' AND '.self::ENTRY.' AND '.$this->latency().
+					' AND ServiceName={exact:String} AND SpanName={endpoint:String}'.
+				' GROUP BY TraceId'.
+				' LIMIT '.self::SAMPLE_TRACES.
+			') AS e ON e.TraceId=s.TraceId'.
+			' WHERE s.Timestamp>=toDateTime64({time_from:Int32},9) AND s.Timestamp<toDateTime64({time_till:Int32},9)+60'.
+				' AND s.Timestamp>=e.ts AND s.Timestamp<=e.te'.
+				' AND NOT (s.ServiceName={exact:String} AND s.SpanName={endpoint:String})'.
+			' GROUP BY service, name'.
+			' ORDER BY total DESC'.
+			' LIMIT '.$limit.
+			self::LOW_MEMORY;
+
+		$rows = [];
+
+		foreach ($this->fetch($sql, $time_from, $time_till, '', ['exact' => ['String', $service],
+				'endpoint' => ['String', $endpoint]]) as $row) {
+			$requests = max(1, (int) $row['requests']);
+
+			$rows[] = [
+				'service' => (string) $row['service'],
+				'name' => (string) $row['name'],
+				'kind' => (string) $row['kind'],
+				'per_request' => (int) $row['spans'] / $requests,
+				'share_requests' => min(100, (int) $row['traces'] / $requests * 100),
+				'avg' => (float) $row['avg'],
+				'share_time' => (float) $row['time'] > 0 ? min(100, (float) $row['total'] / (float) $row['time'] * 100) : 0
+			];
+		}
+
+		return $rows;
+	}
+
+	/**
+	 * Versions (service.version) of each service: when each was seen, its traffic, errors and latency in the period.
+	 * One more period before the selected one is read, to tell a version that was deployed in the period from one
+	 * that was already there.
+	 *
+	 * @param string $service  Exact service name; '' for every service.
+	 *
+	 * @return array  [service => [['version', 'first', 'last', 'requests', 'errors', 'error_rate', 'p95', 'share',
+	 *                'deployed' => bool], ...]], latest version first. Services that send no version are left out.
+	 */
+	public function getVersions(int $time_from, int $time_till, string $service = ''): array {
+		$length = max(1, $time_till - $time_from);
+		$current = 'Timestamp>=toDateTime64({period_start:Int32},9)';
+
+		$sql = 'SELECT ServiceName AS service, ResourceAttributes[\'service.version\'] AS version,'.
+				' toUnixTimestamp(min(Timestamp)) AS first, toUnixTimestamp(max(Timestamp)) AS last,'.
+				' countIf('.$current.') AS requests, countIf('.$current.' AND StatusCode=\'Error\') AS errors,'.
+				' quantileIf(0.95)(Duration,'.$current.' AND '.$this->latency().') AS p95'.
+			' FROM otel_traces'.
+			' WHERE '.$this->period().' AND '.self::ENTRY.' AND ResourceAttributes[\'service.version\']!=\'\''.
+				($service !== '' ? ' AND ServiceName={exact:String}' : '').
+			' GROUP BY service, version'.
+			' ORDER BY service, first DESC';
+
+		$rows = $this->fetch($sql, $time_from - $length, $time_till, '', ['period_start' => ['Int32', $time_from]]
+			+ ($service !== '' ? ['exact' => ['String', $service]] : [])
+		);
+
+		return self::groupVersions(array_map(static fn(array $row): array => [
+			'service' => (string) $row['service'],
+			'version' => (string) $row['version'],
+			'first' => (int) $row['first'],
+			'last' => (int) $row['last'],
+			'requests' => (int) $row['requests'],
+			'errors' => (int) $row['errors'],
+			'p95' => self::finite($row['p95'])
+		], $rows), $time_from);
+	}
+
+	/**
+	 * Versions per service, latest first, each with its share of the traffic of the service and whether it was
+	 * deployed in the period: first seen inside it while another version of the service was seen before.
+	 *
+	 * @param array $rows  ['service', 'version', 'first', 'last', 'requests', 'errors', 'p95']
+	 */
+	public static function groupVersions(array $rows, int $period_start): array {
+		$services = [];
+
+		foreach ($rows as $row) {
+			$services[$row['service']][] = $row;
+		}
+
+		foreach ($services as &$versions) {
+			usort($versions, static fn(array $a, array $b): int => [$b['first'], $b['version']] <=> [$a['first'], $a['version']]);
+
+			$total = array_sum(array_column($versions, 'requests'));
+			$earliest = min(array_column($versions, 'first'));
+
+			foreach ($versions as &$version) {
+				$version['error_rate'] = $version['requests'] > 0 ? $version['errors'] / $version['requests'] * 100 : 0.0;
+				$version['share'] = $total > 0 ? $version['requests'] / $total * 100 : 0.0;
+				$version['deployed'] = $version['first'] >= $period_start && $earliest < $version['first'];
+			}
+			unset($version);
+
+			// Versions seen only before the period carry no figures of it.
+			$versions = array_values(array_filter($versions,
+				static fn(array $version): bool => $version['requests'] > 0 || $version['last'] >= $period_start
+			));
+		}
+		unset($versions);
+
+		return array_filter($services);
+	}
+
+	/**
+	 * Two versions of a service side by side: each endpoint with its requests, error rate and p95 in one and in the
+	 * other, and the errors that happen in one, in the other or in both.
+	 *
+	 * @return array  ['endpoints' => [['endpoint', 'a' => ['requests', 'error_rate', 'p95'], 'b' => [...]], ...],
+	 *                'errors' => [['endpoint', 'type', 'message', 'a' => int, 'b' => int], ...]]
+	 */
+	public function compareVersions(int $time_from, int $time_till, string $service, string $a, string $b): array {
+		$version = 'ResourceAttributes[\'service.version\']';
+		$params = ['exact' => ['String', $service], 'va' => ['String', $a], 'vb' => ['String', $b],
+			'volatile' => ['String', self::VOLATILE_TEXT]
+		];
+		$where = ' FROM otel_traces WHERE '.$this->period().' AND ServiceName={exact:String}'.
+			' AND '.$version.' IN ({va:String},{vb:String})';
+		$result = ['endpoints' => [], 'errors' => []];
+
+		$sql = 'SELECT SpanName AS endpoint';
+
+		foreach (['a', 'b'] as $side) {
+			$is = $version.'={v'.$side.':String}';
+			$sql .= ', countIf('.$is.') AS requests_'.$side.', countIf('.$is.' AND StatusCode=\'Error\') AS errors_'.$side.
+				', quantileIf(0.95)(Duration,'.$is.' AND '.$this->latency().') AS p95_'.$side;
+		}
+
+		$sql .= $where.' AND '.self::ENTRY.' GROUP BY endpoint ORDER BY requests_a+requests_b DESC LIMIT 50';
+
+		foreach ($this->fetch($sql, $time_from, $time_till, '', $params) as $row) {
+			$endpoint = ['endpoint' => (string) $row['endpoint']];
+
+			foreach (['a', 'b'] as $side) {
+				$requests = (int) $row['requests_'.$side];
+				$endpoint[$side] = [
+					'requests' => $requests,
+					'error_rate' => $requests > 0 ? (int) $row['errors_'.$side] / $requests * 100 : 0.0,
+					'p95' => self::finite($row['p95_'.$side])
+				];
+			}
+
+			$result['endpoints'][] = $endpoint;
+		}
+
+		$exception = 'Events.Attributes[indexOf(Events.Name,\'exception\')]';
+		$sql = 'SELECT SpanName AS endpoint,'.
+				' if('.$exception.'[\'exception.type\']!=\'\','.$exception.'[\'exception.type\'],'.
+					'SpanAttributes[\'exception.type\']) AS type,'.
+				' substringUTF8(replaceRegexpAll(multiIf(StatusMessage!=\'\',StatusMessage,'.
+					$exception.'[\'exception.message\']),{volatile:String},\'?\'),1,'.self::ERROR_MESSAGE_MAX_LENGTH.') AS message,'.
+				' countIf('.$version.'={va:String}) AS a, countIf('.$version.'={vb:String}) AS b'.
+			$where.' AND StatusCode=\'Error\''.
+			' GROUP BY endpoint, type, message'.
+			' ORDER BY a+b DESC'.
+			' LIMIT 50';
+
+		foreach ($this->fetch($sql, $time_from, $time_till, '', $params) as $row) {
+			$result['errors'][] = [
+				'endpoint' => (string) $row['endpoint'],
+				'type' => (string) $row['type'],
+				'message' => (string) $row['message'],
+				'a' => (int) $row['a'],
+				'b' => (int) $row['b']
+			];
+		}
+
+		return $result;
+	}
+
+	public const TAGS_SLOW = 'slow';
+	public const TAGS_FAILED = 'failed';
+
+	/**
+	 * Why some requests are slow, or fail: the values of attributes that appear in them much more than in the rest.
+	 * Slow = the slowest 5 % (at or above the p95). From a sample of the requests of the period.
+	 *
+	 * @param string $mode  TAGS_SLOW or TAGS_FAILED.
+	 *
+	 * @return array  ['outliers' => int, 'rest' => int, 'threshold' => float (ns, slow only), 'tags' => rankTags()]
+	 */
+	public function getTagAnalysis(int $time_from, int $time_till, string $service, string $endpoint = '',
+			string $mode = self::TAGS_SLOW): array {
+		$params = ['exact' => ['String', $service]] + ($endpoint !== '' ? ['endpoint' => ['String', $endpoint]] : []);
+		$where = ' FROM otel_traces WHERE '.$this->period().' AND '.self::ENTRY.' AND '.$this->latency().
+			' AND ServiceName={exact:String}'.($endpoint !== '' ? ' AND SpanName={endpoint:String}' : '');
+		$result = ['outliers' => 0, 'rest' => 0, 'threshold' => 0.0, 'tags' => []];
+
+		if ($mode === self::TAGS_SLOW) {
+			$result['threshold'] = self::finite($this->fetch('SELECT quantile(0.95)(Duration) AS p95'.$where, $time_from,
+				$time_till, '', $params
+			)[0]['p95'] ?? null);
+
+			if ($result['threshold'] <= 0) {
+				return $result;
+			}
+
+			$outlier = 'Duration>={threshold:UInt64}';
+			$params['threshold'] = ['UInt64', (int) $result['threshold']];
+		}
+		else {
+			$outlier = 'StatusCode=\'Error\'';
+		}
+
+		$resource_keys = '[\''.implode('\',\'', self::TAG_RESOURCE_KEYS).'\']';
+
+		$sql = 'SELECT pair.1 AS k, pair.2 AS v, countIf(outlier) AS o, countIf(NOT outlier) AS b,'.
+				' any(total_o) AS total_o, any(total_b) AS total_b'.
+			' FROM ('.
+				'SELECT '.$outlier.' AS outlier, countIf(outlier) OVER () AS total_o, countIf(NOT outlier) OVER () AS total_b,'.
+					' arrayConcat(arrayZip(mapKeys(SpanAttributes),mapValues(SpanAttributes)),'.
+						' arrayFilter(x -> x.2!=\'\',arrayMap(k -> (k,ResourceAttributes[k]),'.$resource_keys.'))) AS pairs'.
+				$where.
+				' LIMIT '.self::SAMPLE_REQUESTS.
+			')'.
+			' ARRAY JOIN pairs AS pair'.
+			' GROUP BY k, v'.
+			' HAVING o>='.self::TAG_MIN_REQUESTS.
+			' ORDER BY o DESC'.
+			' LIMIT 2000'.
+			self::LOW_MEMORY;
+
+		$rows = $this->fetch($sql, $time_from, $time_till, '', $params);
+
+		if ($rows) {
+			$result['outliers'] = (int) $rows[0]['total_o'];
+			$result['rest'] = (int) $rows[0]['total_b'];
+			$result['tags'] = self::rankTags(array_map(static fn(array $row): array => [
+				'key' => (string) $row['k'], 'value' => (string) $row['v'], 'outliers' => (int) $row['o'],
+				'rest' => (int) $row['b']
+			], $rows), $result['outliers'], $result['rest']);
+		}
+
+		return $result;
+	}
+
+	/**
+	 * The attribute values that tell the outliers from the rest: present in a larger share of the outliers than of
+	 * the rest, largest difference first. Attributes with many values (ids, URLs) are dropped: they describe single
+	 * requests.
+	 *
+	 * @param array $rows  ['key', 'value', 'outliers', 'rest'], counts of requests with that value.
+	 *
+	 * @return array  ['key', 'value', 'outliers', 'rest', 'share_outliers' (%), 'share_rest' (%), 'lift'].
+	 */
+	public static function rankTags(array $rows, int $outliers, int $rest, int $limit = 12): array {
+		if ($outliers <= 0) {
+			return [];
+		}
+
+		$values = [];
+
+		foreach ($rows as $row) {
+			$values[$row['key']] = ($values[$row['key']] ?? 0) + 1;
+		}
+
+		$tags = [];
+
+		foreach ($rows as $row) {
+			if ($values[$row['key']] > self::TAG_MAX_VALUES || $row['outliers'] < self::TAG_MIN_REQUESTS) {
+				continue;
+			}
+
+			$share_outliers = $row['outliers'] / $outliers * 100;
+			$share_rest = $rest > 0 ? $row['rest'] / $rest * 100 : 0.0;
+
+			// Worth showing: clearly more frequent among the outliers.
+			if ($share_outliers - $share_rest < 10) {
+				continue;
+			}
+
+			$tags[] = $row + [
+				'share_outliers' => $share_outliers,
+				'share_rest' => $share_rest,
+				'lift' => $share_rest > 0 ? $share_outliers / $share_rest : null
+			];
+		}
+
+		usort($tags, static fn(array $a, array $b): int =>
+			[$b['share_outliers'] - $b['share_rest'], $b['outliers'], $a['key']]
+				<=> [$a['share_outliers'] - $a['share_rest'], $a['outliers'], $b['key']]
+		);
+
+		return array_slice($tags, 0, $limit);
 	}
 
 	/**

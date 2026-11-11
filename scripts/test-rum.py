@@ -81,7 +81,7 @@ def send_sample(url: str, namespace: str) -> None:
         raise SystemExit(f'Cannot send the sample to {url}: {error}')
 
 
-def send_error(base_url: str, namespace: str) -> None:
+def send_error(base_url: str, namespace: str, version: str = '', healthy: bool = False) -> None:
     """One synthetic browser session that fails: a page load, an uncaught exception of the page, and a request that
     fails in a backend service (same trace), with a log record of that backend. Services rum-test-web and rum-test-api.
     Run it again to see the errors active; stop running it to see them resolved."""
@@ -130,12 +130,21 @@ def send_error(base_url: str, namespace: str) -> None:
 
     def resource(service: str, browser: bool) -> dict:
         return {'attributes': [attribute('service.name', service), attribute('service.namespace', namespace)]
-            + ([attribute('telemetry.sdk.language', 'webjs')] if browser else [])}
+            + ([attribute('telemetry.sdk.language', 'webjs')] if browser else [])
+            + ([attribute('service.version', version)] if version and not browser else [])}
+
+    # A version that works: the same request, answered.
+    if healthy:
+        for item in (request, server):
+            item.pop('status', None)
+            item.pop('events', None)
+            item['attributes'] = [a for a in item['attributes'] if a['key'] != 'http.response.status_code'] + [
+                attribute('http.response.status_code', '200')]
 
     payloads = {
         '/v1/traces': {'resourceSpans': [
-            {'resource': resource('rum-test-web', True),
-                'scopeSpans': [{'scope': {'name': 'rum-test'}, 'spans': [load, script, page_error, request]}]},
+            {'resource': resource('rum-test-web', True), 'scopeSpans': [{'scope': {'name': 'rum-test'},
+                'spans': [load, script, request] + ([] if healthy else [page_error])}]},
             {'resource': resource('rum-test-api', False), 'scopeSpans': [{'scope': {'name': 'rum-test'}, 'spans': [server]}]}
         ]},
         '/v1/logs': {'resourceLogs': [{'resource': resource('rum-test-api', False), 'scopeLogs': [{
@@ -167,10 +176,14 @@ def main() -> int:
     parser.add_argument('--send-sample', metavar='URL', help='send synthetic Web Vitals to this OTLP/HTTP logs URL')
     parser.add_argument('--send-error', metavar='URL', help='send a synthetic browser session that fails (a page'
         ' error and a request that fails in a backend service) to this OTLP/HTTP base URL, e.g. http://127.0.0.1:4318')
+    parser.add_argument('--version', default='', help='with --send-error: service.version of the backend service'
+        ' (rum-test-api), to see deployments and compare versions')
+    parser.add_argument('--healthy', action='store_true', help='with --send-error: the request succeeds (a version that'
+        ' works, to compare with one that fails)')
     args = parser.parse_args()
 
     if args.send_error:
-        send_error(args.send_error, args.namespace)
+        send_error(args.send_error, args.namespace, args.version, args.healthy)
         return 0
 
     if not os.environ.get('CH_URL'):

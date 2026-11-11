@@ -180,6 +180,8 @@ class CApmOverviewLive {
 					const open = [...block.querySelectorAll('details[data-trace][open]')].map((el) => el.dataset.trace);
 
 					block.innerHTML = response.html;
+					// What the user picked on the map (a service, a search) is put back on the new drawing.
+					document.dispatchEvent(new CustomEvent('apm:block-updated', {detail: {block}}));
 					block.classList.remove('apm-overview-stale');
 					block.removeAttribute('title');
 
@@ -443,6 +445,20 @@ class CApmServiceMapInteraction {
 	constructor() {
 		this._tip = null;
 		this._current = null;
+		// What was asked of the map; kept here because the real-time refresh replaces the drawing.
+		this._state = {picked: null, search: '', problems: false, hide_dependencies: false};
+
+		document.addEventListener('click', (e) => this._click(e));
+		document.addEventListener('input', (e) => this._input(e));
+		document.addEventListener('change', (e) => this._input(e));
+		document.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape' && this._state.picked !== null && !CApmServicePanel.isOpen()
+					&& !CApmTracePanel.isOpen()) {
+				this._pick(null);
+			}
+		});
+		document.addEventListener('apm:block-updated', () => this._applyAll());
+		document.addEventListener('apm:service-panel-closed', () => this._pick(null));
 
 		document.addEventListener('mouseover', (e) => this._over(e));
 		document.addEventListener('mouseout', (e) => this._out(e));
@@ -453,6 +469,157 @@ class CApmServiceMapInteraction {
 
 	_element(target) {
 		return target instanceof Element ? target.closest('.apm-map-svg [data-apm-node], .apm-map-svg [data-apm-edge]') : null;
+	}
+
+	/**
+	 * A click on a service keeps only its path on the map (who calls it, what it calls) and opens its details; a
+	 * click on the empty part of the map, or Escape, brings everything back. A modified click follows the link.
+	 */
+	_click(e) {
+		if (!(e.target instanceof Element) || e.target.closest('.apm-map-svg') === null) {
+			return;
+		}
+
+		const node = e.target.closest('[data-apm-node]');
+
+		if (node === null) {
+			if (e.target.closest('[data-apm-edge]') === null) {
+				this._pick(null);
+			}
+
+			return;
+		}
+
+		if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {
+			return;
+		}
+
+		e.preventDefault();
+		this._pick(node.dataset.apmNode);
+
+		if (node.dataset.apmService !== undefined) {
+			CApmServicePanel.open(node.dataset.apmService, node.closest('a')?.getAttribute('href') ?? '');
+		}
+	}
+
+	_pick(id) {
+		this._state.picked = id;
+		this._applyAll();
+	}
+
+	_input(e) {
+		const tools = e.target instanceof Element ? e.target.closest('.apm-map-tools') : null;
+
+		if (tools === null) {
+			return;
+		}
+
+		this._state.search = (tools.querySelector('[data-apm-map-search]')?.value ?? '').trim().toLowerCase();
+		this._state.problems = tools.querySelector('[data-apm-map-problems]')?.checked ?? false;
+		this._state.hide_dependencies = tools.querySelector('[data-apm-map-dependencies]')?.checked ?? false;
+		this._applyAll();
+	}
+
+	_applyAll() {
+		for (const tools of document.querySelectorAll('.apm-map-tools')) {
+			const search = tools.querySelector('[data-apm-map-search]');
+			const problems = tools.querySelector('[data-apm-map-problems]');
+			const dependencies = tools.querySelector('[data-apm-map-dependencies]');
+
+			if (search !== null && search !== document.activeElement) {
+				search.value = this._state.search;
+			}
+
+			if (problems !== null) {
+				problems.checked = this._state.problems;
+			}
+
+			if (dependencies !== null) {
+				dependencies.checked = this._state.hide_dependencies;
+			}
+		}
+
+		for (const svg of document.querySelectorAll('.apm-map-svg')) {
+			this._apply(svg);
+		}
+	}
+
+	/**
+	 * Put the state on one drawing: what is hidden (dependencies), what is kept (the picked service and its
+	 * neighbours, the search, the problems and what connects to them) and what fades.
+	 */
+	_apply(svg) {
+		const nodes = [...svg.querySelectorAll('[data-apm-node]')];
+		const edges = [...svg.querySelectorAll('[data-apm-edge]')];
+		const {picked, search, problems, hide_dependencies} = this._state;
+
+		for (const node of nodes) {
+			node.classList.toggle('apm-map-hidden',
+				hide_dependencies && !['service', 'users'].includes(node.dataset.kind)
+			);
+			node.classList.toggle('apm-map-picked', picked !== null && node.dataset.apmNode === picked);
+		}
+
+		const hidden = new Set(nodes.filter((n) => n.classList.contains('apm-map-hidden')).map((n) => n.dataset.apmNode));
+
+		for (const edge of edges) {
+			edge.classList.toggle('apm-map-hidden', hidden.has(edge.dataset.from) || hidden.has(edge.dataset.to));
+		}
+
+		const filtering = picked !== null || search !== '' || problems;
+		const kept = new Set();
+		const kept_edges = new Set();
+
+		if (filtering) {
+			// The nodes asked for...
+			let wanted = nodes.filter((node) => !node.classList.contains('apm-map-hidden'));
+
+			if (picked !== null && wanted.some((node) => node.dataset.apmNode === picked)) {
+				wanted = wanted.filter((node) => node.dataset.apmNode === picked);
+			}
+
+			if (search !== '') {
+				wanted = wanted.filter((node) => (node.dataset.name ?? '').toLowerCase().includes(search));
+			}
+
+			if (problems) {
+				wanted = wanted.filter((node) => ['warn', 'bad'].includes(node.dataset.health)
+					|| edges.some((edge) => ['warn', 'bad'].includes(edge.dataset.health)
+						&& (edge.dataset.from === node.dataset.apmNode || edge.dataset.to === node.dataset.apmNode))
+				);
+			}
+
+			for (const node of wanted) {
+				kept.add(node.dataset.apmNode);
+			}
+
+			// ...and, for one picked service, who calls it and what it calls; otherwise what connects the kept ones.
+			for (const edge of edges) {
+				const from = kept.has(edge.dataset.from);
+				const to = kept.has(edge.dataset.to);
+
+				if (picked !== null && search === '' && !problems ? (from || to) : (from && to)) {
+					kept_edges.add(edge);
+				}
+			}
+
+			if (picked !== null && search === '' && !problems) {
+				for (const edge of kept_edges) {
+					kept.add(edge.dataset.from);
+					kept.add(edge.dataset.to);
+				}
+			}
+		}
+
+		svg.classList.toggle('apm-map-isolated', filtering);
+
+		for (const node of nodes) {
+			node.classList.toggle('apm-map-kept', filtering && kept.has(node.dataset.apmNode));
+		}
+
+		for (const edge of edges) {
+			edge.classList.toggle('apm-map-kept', filtering && kept_edges.has(edge));
+		}
 	}
 
 	_over(e) {
@@ -795,3 +962,111 @@ class CApmTracePanel {
 }
 
 CApmTracePanel.init();
+
+/**
+ * Service panel: the details of the service picked on the map (apm.service.panel), without leaving it: health, traffic,
+ * errors and latency now and over the period, Zabbix problems, versions, who calls it and what it calls, and the way
+ * to its page, traces and logs. The HTML comes rendered and escaped by the server.
+ */
+class CApmServicePanel {
+
+	static _panel = null;
+	static _request = null;
+
+	static init() {
+		document.addEventListener('click', (e) => {
+			if (e.target instanceof Element && e.target.closest('.apm-service-panel-close') !== null) {
+				CApmServicePanel.close();
+			}
+		});
+
+		document.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape' && CApmServicePanel.isOpen() && !CApmTracePanel.isOpen()) {
+				CApmServicePanel.close();
+			}
+		});
+	}
+
+	static isOpen() {
+		return CApmServicePanel._panel !== null && !CApmServicePanel._panel.hidden;
+	}
+
+	static _create() {
+		const panel = document.createElement('aside');
+		const head = document.createElement('div');
+		const title = document.createElement('h4');
+		const close = document.createElement('button');
+		const body = document.createElement('div');
+
+		panel.className = 'apm-rum-panel apm-service-panel';
+		panel.hidden = true;
+		panel.setAttribute('aria-labelledby', 'apm-service-panel-title');
+		head.className = 'apm-rum-panel-head';
+		title.id = 'apm-service-panel-title';
+		close.type = 'button';
+		close.className = 'apm-rum-panel-close apm-service-panel-close';
+		close.setAttribute('aria-label', 'Close');
+		close.textContent = '×';
+		body.className = 'apm-rum-panel-body';
+
+		head.append(title, close);
+		panel.append(head, body);
+		document.body.append(panel);
+
+		return panel;
+	}
+
+	/**
+	 * @param {string} service  Service name.
+	 * @param {string} href     Link of the node (the service page): its arguments say which application and period.
+	 */
+	static open(service, href) {
+		const panel = CApmServicePanel._panel ??= CApmServicePanel._create();
+		const body = panel.querySelector('.apm-rum-panel-body');
+		const url = new URL(href !== '' ? href : 'zabbix.php', location.href);
+
+		url.searchParams.set('action', 'apm.service.panel');
+		url.searchParams.set('service', service);
+
+		CApmServicePanel._request?.abort();
+		CApmServicePanel._request = new AbortController();
+		panel.querySelector('#apm-service-panel-title').textContent = service;
+		body.textContent = '…';
+		panel.hidden = false;
+
+		fetch(url, {credentials: 'same-origin', signal: CApmServicePanel._request.signal})
+			.then((response) => response.ok ? response.json() : Promise.reject(new Error(response.statusText)))
+			.then((response) => {
+				if (typeof response.html !== 'string') {
+					throw new Error(response.error ?? '');
+				}
+
+				body.innerHTML = response.html;
+			})
+			.catch((error) => {
+				if (error.name !== 'AbortError') {
+					body.textContent = '';
+
+					if (href !== '') {
+						const fallback = document.createElement('a');
+
+						fallback.href = href;
+						fallback.textContent = service;
+						body.append(fallback);
+					}
+				}
+			});
+	}
+
+	static close() {
+		CApmServicePanel._request?.abort();
+
+		if (CApmServicePanel._panel !== null) {
+			CApmServicePanel._panel.hidden = true;
+		}
+
+		document.dispatchEvent(new CustomEvent('apm:service-panel-closed'));
+	}
+}
+
+CApmServicePanel.init();

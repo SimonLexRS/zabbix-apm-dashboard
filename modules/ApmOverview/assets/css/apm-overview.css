@@ -233,56 +233,79 @@
 .apm-map-svg a {
 	color: inherit;
 	cursor: pointer;
+	text-decoration: none;
 }
 
 .apm-map-svg .apm-map-node,
-.apm-map-svg .apm-map-edge,
-.apm-map-edge-label {
+.apm-map-svg .apm-map-edge {
 	transition: opacity 0.15s;
 }
 
-/* Edges: color by health, width by share of the traffic (set by ServiceMap), moving particles on top. */
+/* Connections: grey while healthy, so that color always means something. */
 .apm-map-edge path {
 	fill: none;
 }
 
+.apm-map-hit {
+	stroke: transparent;
+	stroke-width: 12;
+}
+
 .apm-map-line {
-	stroke: #3db87a;
-	opacity: 0.45;
-}
-
-.apm-map-edge.apm-map-warn .apm-map-line {
-	stroke: #ffb625;
-	opacity: 0.6;
-}
-
-.apm-map-edge.apm-map-bad .apm-map-line {
-	stroke: #e45959;
+	stroke: #a3aeb6;
 	opacity: 0.7;
 }
 
+html[color-scheme="dark"] .apm-map-line {
+	stroke: #6f7b84;
+}
+
+.apm-map-edge.apm-map-warn .apm-map-line {
+	stroke: #e8a000;
+	opacity: 0.95;
+}
+
+.apm-map-edge.apm-map-bad .apm-map-line {
+	stroke: #d64e4e;
+	opacity: 0.95;
+}
+
+.apm-map-arrow.apm-map-ok path {
+	fill: #a3aeb6;
+}
+
+html[color-scheme="dark"] .apm-map-arrow.apm-map-ok path {
+	fill: #6f7b84;
+}
+
+.apm-map-arrow.apm-map-warn path {
+	fill: #e8a000;
+}
+
+.apm-map-arrow.apm-map-bad path {
+	fill: #d64e4e;
+}
+
+/* The flow moves only along the connections of the node that is pointed at or picked. */
 .apm-map-flow {
-	stroke: #59db8f;
+	display: none;
+	stroke: #ffffff;
 	stroke-linecap: round;
 	stroke-dasharray: 0.1 13.9;
-	animation: apm-map-flow 1.4s linear infinite;
+	opacity: 0.9;
 	pointer-events: none;
 }
 
-.apm-map-edge.apm-map-warn .apm-map-flow {
-	stroke: #ffc94d;
+.apm-map-edge.apm-map-lit .apm-map-flow {
+	display: inline;
+	animation: apm-map-flow 1.4s linear infinite;
 }
 
-.apm-map-edge.apm-map-erroring .apm-map-flow,
-.apm-map-edge.apm-map-bad .apm-map-flow {
-	stroke: #ff6b6b;
-}
-
-.apm-map-flow-medium .apm-map-flow {
+.apm-map-flow-medium.apm-map-lit .apm-map-flow {
 	animation-duration: 0.8s;
 }
 
-.apm-map-flow-fast .apm-map-flow {
+.apm-map-flow-fast.apm-map-lit .apm-map-flow {
 	animation-duration: 0.45s;
 }
 
@@ -296,146 +319,196 @@
 	}
 }
 
-/* Real time paused (apm-overview.js) or reduced motion: the particles stop. */
 .apm-live-paused .apm-map-flow {
 	animation-play-state: paused;
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.apm-map-flow {
+	.apm-map-edge.apm-map-lit .apm-map-flow {
 		animation: none;
+		display: none;
 	}
 }
 
-.apm-map-arrow.apm-map-ok path {
-	fill: #3db87a;
+.apm-map-edge.apm-map-lit .apm-map-line {
+	stroke: #4a5b66;
+	opacity: 1;
 }
 
-.apm-map-arrow.apm-map-warn path {
-	fill: #ffb625;
+html[color-scheme="dark"] .apm-map-edge.apm-map-lit .apm-map-line {
+	stroke: #b9c4cc;
 }
 
-.apm-map-arrow.apm-map-bad path {
-	fill: #e45959;
+.apm-map-edge.apm-map-warn.apm-map-lit .apm-map-line {
+	stroke: #e8a000;
 }
 
-.apm-map-svg a:hover .apm-map-line,
-.apm-map-svg a:focus .apm-map-line {
-	opacity: 0.9;
+.apm-map-edge.apm-map-bad.apm-map-lit .apm-map-line {
+	stroke: #d64e4e;
 }
 
-.apm-map-edge-label {
-	font-size: 11px;
-	font-weight: bold;
-	fill: #e45959 !important;
-	paint-order: stroke;
-	stroke: #ffffff;
-	stroke-width: 4px;
-	stroke-linejoin: round;
-	pointer-events: none;
-}
-
-html[color-scheme="dark"] .apm-map-edge-label {
-	stroke: #2b2b2b;
-}
-
-/* Nodes: card, health bar, kind icon, name and one line of figures. */
-/* Opaque: arrows that pass behind a node do not show through it. */
-.apm-map-card {
-	fill: #ffffff;
-	stroke: rgba(128, 128, 128, 0.55);
-	stroke-width: 1;
-}
-
-html[color-scheme="dark"] .apm-map-card {
-	fill: #383838;
-}
-
-.apm-map-bar {
-	fill: #59db8f;
-}
-
-.apm-map-node.apm-map-warn .apm-map-bar {
-	fill: #ffb625;
-}
-
-.apm-map-node.apm-map-bad .apm-map-bar {
-	fill: #e45959;
-}
-
-.apm-map-node.apm-map-neutral .apm-map-bar {
-	fill: #3b82f6;
-}
-
-.apm-map-node.apm-map-warn .apm-map-card {
-	stroke: #ffb625;
-	fill: #fff6e0;
-}
-
-.apm-map-node.apm-map-bad .apm-map-card {
-	stroke: #e45959;
-	fill: #fdeaea;
-}
-
-html[color-scheme="dark"] .apm-map-node.apm-map-warn .apm-map-card {
-	fill: #4a4128;
-}
-
-html[color-scheme="dark"] .apm-map-node.apm-map-bad .apm-map-card {
-	fill: #4d3030;
-}
-
-.apm-map-kind-database .apm-map-card,
-.apm-map-kind-queue .apm-map-card,
-.apm-map-kind-external .apm-map-card {
-	stroke-dasharray: 5 3;
-}
-
-.apm-map-icon {
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 1.4;
-	stroke-linejoin: round;
-	opacity: 0.75;
-}
-
-.apm-map-kind-users .apm-map-icon {
-	fill: currentColor;
-	stroke: none;
-}
-
-.apm-map-svg a:hover .apm-map-card,
-.apm-map-svg a:focus .apm-map-card {
-	stroke-width: 2.5;
-}
-
-.apm-map-node.apm-map-focus .apm-map-card {
+/* Nodes. A service: a soft fill in the color of its technology, its letters inside, and a ring that is its health. */
+.apm-map-shape {
+	fill: #eef1f3;
+	stroke: #2f9e68;
 	stroke-width: 3;
 }
 
-.apm-map-node-name {
-	font-size: 13px;
+html[color-scheme="dark"] .apm-map-shape {
+	fill: #33383b;
+}
+
+.apm-map-shape.apm-map-ring {
+	fill: none;
+}
+
+.apm-map-svg .apm-map-node .apm-map-shape.apm-map-ring-ok {
+	stroke: #2f9e68;
+	stroke-width: 3;
+}
+
+.apm-map-svg .apm-map-node .apm-map-shape.apm-map-ring-neutral {
+	stroke: #5b7fa6;
+}
+
+/* The share of the requests that fail now, over the ring, from the top. */
+.apm-map-arc {
+	fill: none;
+	stroke: #d64e4e;
+	stroke-width: 4.5;
+	stroke-linecap: butt;
+	pointer-events: none;
+}
+
+.apm-map-back {
+	fill: #ffffff;
+}
+
+html[color-scheme="dark"] .apm-map-back {
+	fill: #2b2b2b;
+}
+
+.apm-map-fill {
+	fill: #8a97a0;
+	fill-opacity: 0.18;
+}
+
+html[color-scheme="dark"] .apm-map-fill {
+	fill-opacity: 0.3;
+}
+
+.apm-map-lang-go { fill: #00a7d0; }
+.apm-map-lang-java { fill: #e0731d; }
+.apm-map-lang-dotnet { fill: #6a3fd6; }
+.apm-map-lang-nodejs { fill: #4f9a3d; }
+.apm-map-lang-python { fill: #3572a5; }
+.apm-map-lang-php { fill: #6c71b5; }
+.apm-map-lang-ruby { fill: #c2362d; }
+.apm-map-lang-rust { fill: #b0522a; }
+.apm-map-lang-cpp { fill: #1f6fb0; }
+.apm-map-lang-erlang { fill: #8e3a9d; }
+.apm-map-lang-swift { fill: #e8552d; }
+.apm-map-lang-webjs { fill: #c9a400; }
+.apm-map-lang-users { fill: #5b7fa6; }
+
+.apm-map-mono {
 	font-weight: bold;
+	letter-spacing: -0.02em;
+	opacity: 0.8;
+	pointer-events: none;
+}
+
+.apm-map-node.apm-map-warn .apm-map-shape {
+	stroke: #e8a000;
+}
+
+.apm-map-node.apm-map-bad .apm-map-shape {
+	stroke: #d64e4e;
+	stroke-width: 4;
+}
+
+.apm-map-node.apm-map-neutral .apm-map-shape {
+	stroke: #5b7fa6;
+}
+
+.apm-map-kind-external .apm-map-shape {
+	stroke-dasharray: 4 3;
+}
+
+.apm-map-shape-detail {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.3;
+	opacity: 0.55;
+}
+
+.apm-map-glyph-solid {
+	fill: currentColor;
+	opacity: 0.6;
+}
+
+.apm-map-svg a:hover .apm-map-shape,
+.apm-map-svg a:focus .apm-map-shape,
+.apm-map-node.apm-map-picked .apm-map-shape,
+.apm-map-node.apm-map-focus .apm-map-shape {
+	stroke-width: 5;
+}
+
+.apm-map-node-name {
+	font-size: 12px;
+	font-weight: bold;
+	paint-order: stroke;
+	stroke: #ffffff;
+	stroke-width: 3px;
+	stroke-linejoin: round;
 }
 
 .apm-map-node-stats {
 	font-size: 11px;
-	opacity: 0.85;
+	opacity: 0.65;
+	paint-order: stroke;
+	stroke: #ffffff;
+	stroke-width: 3px;
+	stroke-linejoin: round;
+}
+
+html[color-scheme="dark"] .apm-map-node-name,
+html[color-scheme="dark"] .apm-map-node-stats {
+	stroke: #2b2b2b;
 }
 
 .apm-map-hot {
-	fill: #e45959 !important;
+	fill: #d64e4e !important;
 	font-weight: bold;
+	opacity: 1;
 }
 
-/* Page filter: the rest is dimmed. Hover (apm-map-tracing): only the path of the hovered element stays. */
+/* Open Zabbix problems of a service: the color of the highest severity. */
+.apm-map-badge {
+	stroke: #ffffff;
+	stroke-width: 1.5;
+	fill: #97aab3;
+}
+
+.apm-map-severity-1 { fill: #7499ff; }
+.apm-map-severity-2 { fill: #ffc859; }
+.apm-map-severity-3 { fill: #ffa059; }
+.apm-map-severity-4 { fill: #e97659; }
+.apm-map-severity-5 { fill: #e45959; }
+
+.apm-map-badge-text {
+	font-size: 10px;
+	font-weight: bold;
+	fill: #1f2c33 !important;
+	pointer-events: none;
+}
+
 .apm-map-svg .apm-map-dim {
-	opacity: 0.35;
+	opacity: 0.3;
 }
 
 .apm-map-svg.apm-map-tracing .apm-map-node,
-.apm-map-svg.apm-map-tracing .apm-map-edge,
-.apm-map-svg.apm-map-tracing .apm-map-edge-label {
+.apm-map-svg.apm-map-tracing .apm-map-edge {
 	opacity: 0.12;
 }
 
@@ -443,8 +516,25 @@ html[color-scheme="dark"] .apm-map-node.apm-map-bad .apm-map-card {
 	opacity: 1;
 }
 
-.apm-map-svg.apm-map-tracing .apm-map-edge.apm-map-lit .apm-map-line {
-	opacity: 0.85;
+.apm-map-svg .apm-map-hidden {
+	display: none;
+}
+
+/* Controls above the map. */
+.apm-map-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 16px;
+	margin: 0 0 6px;
+}
+
+.apm-map-tools input[type="search"] {
+	width: 200px;
+}
+
+.apm-map-tools label {
+	cursor: pointer;
 }
 
 .apm-map-tip {
@@ -1426,4 +1516,242 @@ html[color-scheme="dark"] .apm-rum-panel {
 .apm-rum-view-wf > summary {
 	cursor: pointer;
 	color: #768d99;
+}
+
+/* A picked service, a search or "only problems": the rest of the map steps back. */
+.apm-map-svg.apm-map-isolated .apm-map-node:not(.apm-map-kept),
+.apm-map-svg.apm-map-isolated .apm-map-edge:not(.apm-map-kept) {
+	opacity: 0.1;
+}
+
+.apm-map-svg.apm-map-isolated.apm-map-tracing .apm-map-lit {
+	opacity: 1;
+}
+
+.apm-map-edge.apm-map-kept .apm-map-flow {
+	display: inline;
+	animation: apm-map-flow 1.4s linear infinite;
+}
+
+.apm-map-edge.apm-map-kept .apm-map-line {
+	opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.apm-map-edge.apm-map-kept .apm-map-flow {
+		animation: none;
+		display: none;
+	}
+}
+
+/* Service panel: narrower than the trace panel, the map stays visible beside it. */
+.apm-service-panel {
+	width: min(460px, 92vw);
+	z-index: 1005;
+}
+
+/* Above the map: one line that says how things are, and what needs attention. */
+.apm-map-line-summary {
+	flex: 1 1 100%;
+	line-height: 1.6;
+}
+
+.apm-map-summary .apm-map-attention {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px 18px;
+	flex: 1 1 100%;
+}
+
+/* Service and endpoint pages. */
+.apm-service-path {
+	margin: 0 0 8px;
+	font-size: 14px;
+	overflow-wrap: anywhere;
+}
+
+.apm-service-header {
+	margin-bottom: 12px;
+}
+
+.apm-service-figures {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 32px;
+	margin-bottom: 6px;
+}
+
+.apm-service-figure {
+	display: flex;
+	flex-direction: column;
+	line-height: 1.35;
+}
+
+.apm-service-figure-value {
+	font-size: 18px;
+	font-weight: bold;
+}
+
+.apm-service-facts {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 4px 16px;
+	color: #768d99;
+}
+
+.apm-service-problems {
+	margin: 0 0 12px;
+	padding: 8px 12px;
+	border-left: 3px solid #e97659;
+	background: rgba(233, 118, 89, 0.08);
+}
+
+.apm-service-problem-list,
+.apm-service-neighbours {
+	margin: 4px 0 6px;
+	padding: 0;
+	list-style: none;
+	line-height: 1.8;
+}
+
+.apm-service-two {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+	gap: 12px;
+}
+
+.apm-service-compare {
+	margin: 0 0 8px;
+}
+
+.apm-service-trends {
+	display: flex;
+	gap: 18px;
+	margin: 0 0 12px;
+}
+
+.apm-service-panel-body h5 {
+	margin: 10px 0 2px;
+	font-weight: bold;
+}
+
+.apm-service-panel-links {
+	margin-top: 12px;
+	padding-top: 8px;
+	border-top: 1px solid rgba(128, 128, 128, 0.35);
+}
+
+/* Time series drawn by the server. */
+.apm-chart-row {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+	gap: 16px;
+	margin: 0 0 14px;
+}
+
+.apm-chart-head,
+.apm-chart-foot {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	color: #768d99;
+	font-size: 11px;
+}
+
+.apm-chart-head strong {
+	color: inherit;
+	font-size: 12px;
+}
+
+.apm-chart-svg {
+	display: block;
+	width: 100%;
+	height: 130px;
+}
+
+.apm-chart-grid {
+	stroke: rgba(128, 128, 128, 0.25);
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.apm-chart-line {
+	fill: none;
+	stroke: #2f7fd0;
+	stroke-width: 1.8;
+	stroke-linejoin: round;
+	vector-effect: non-scaling-stroke;
+}
+
+.apm-chart-line.apm-chart-errors {
+	stroke: #d64e4e;
+}
+
+.apm-chart-line.apm-chart-p50 {
+	stroke: #7a8a94;
+	stroke-width: 1.2;
+}
+
+.apm-chart-line.apm-chart-day {
+	stroke: #8a97a0;
+}
+
+.apm-chart-line.apm-chart-week {
+	stroke: #b9a26b;
+}
+
+.apm-chart-line.apm-chart-dashed {
+	stroke-width: 1.1;
+	stroke-dasharray: 4 3;
+}
+
+.apm-chart-mark {
+	stroke: #7a52c7;
+	stroke-width: 1.5;
+	stroke-dasharray: 2 2;
+	vector-effect: non-scaling-stroke;
+}
+
+.apm-chart-hover {
+	fill: transparent;
+}
+
+.apm-chart-hover:hover {
+	fill: rgba(128, 128, 128, 0.14);
+}
+
+.apm-chart-legend {
+	display: flex;
+	gap: 10px;
+}
+
+.apm-chart-key::before {
+	content: "";
+	display: inline-block;
+	width: 14px;
+	margin-right: 4px;
+	border-top: 2px solid #2f7fd0;
+	vertical-align: middle;
+}
+
+.apm-chart-key.apm-chart-errors::before { border-color: #d64e4e; }
+.apm-chart-key.apm-chart-p50::before { border-color: #7a8a94; }
+.apm-chart-key.apm-chart-day::before { border-color: #8a97a0; border-top-style: dashed; }
+.apm-chart-key.apm-chart-week::before { border-color: #b9a26b; border-top-style: dashed; }
+
+/* A bar with its figure beside it, not inside: small shares stay honest. */
+.apm-share-cell {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.apm-share-cell .apm-slow-bar {
+	flex: 1;
+}
+
+.apm-share-value {
+	width: 40px;
+	text-align: right;
 }

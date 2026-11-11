@@ -19,6 +19,10 @@ namespace {
 	require $root.'/ApmOverview/includes/Rum.php';
 	require $root.'/ApmOverview/includes/RumStats.php';
 	require $root.'/ApmOverview/includes/TraceStats.php';
+	require $root.'/ApmOverview/includes/ZabbixProblems.php';
+	require $root.'/ApmOverview/includes/Chart.php';
+	require $root.'/ApmOverview/includes/ServiceLoader.php';
+	require $root.'/ApmOverview/includes/ServiceHtml.php';
 	require $root.'/ApmOverview/includes/ServiceMap.php';
 	require $root.'/ApmOverview/includes/Integration.php';
 	require $root.'/ApmOverview/includes/BusinessMetrics.php';
@@ -251,6 +255,124 @@ namespace Modules\ApmOverview\Includes {
 	$summary2 = ServiceMap::summary($graph2);
 	check('map summary: only user traffic is incoming', $summary2['requests'], 100);
 	check('map summary: attention follows now', array_column($summary2['attention'], 'label'), ['cart']);
+
+	// The graph as drawn: nodes as large as their traffic, and a connection that skips a column gets a waypoint in it,
+	// so its line runs between the nodes. Lanes are shared by the connections that leave the same node.
+	check('node radius', [ServiceMap::nodeRadius(0, 100), ServiceMap::nodeRadius(100, 100), ServiceMap::nodeRadius(25, 100),
+		ServiceMap::nodeRadius(5, 0)], [15.0, 30.0, 22.5, 15.0]);
+
+	// Inside a node, its technology; around it, the share of the requests that fail as an arc of the ring.
+	check('technology of a node', array_map(static fn(array $node): array => array_values(ServiceMap::language($node)), [
+		['kind' => 'service', 'language' => 'go'],
+		['kind' => 'service', 'language' => 'DotNet'],
+		['kind' => 'service', 'language' => 'nodejs', 'browser' => true],
+		['kind' => 'service', 'language' => 'cobol'],
+		['kind' => 'service', 'language' => ''],
+		['kind' => 'database', 'language' => 'go']
+	]), [['go', 'Go', 'Go'], ['dotnet', '.NET', '.NET'], ['webjs', '', 'Browser'], ['other', '', ''], ['other', '', ''],
+		['other', '', '']
+	]);
+	check('error arc: nothing fails', ServiceMap::errorArc(0.0, 20), null);
+	check('error arc: a third', ServiceMap::errorArc(30.0, 20), [37.7, 88.0]);
+	check('error arc: everything', ServiceMap::errorArc(100.0, 20), [125.7, 0.0]);
+	check('error arc: a small share is still visible', ServiceMap::errorArc(0.1, 20), [5.0, 120.7]);
+	$layout = ServiceMap::layout($graph);
+	$route = static function (string $from, string $to) use ($graph, $layout): array {
+		foreach ($graph['edges'] as $i => $edge) {
+			if ($edge['from'] === $from && $edge['to'] === $to) {
+				return $layout['routes'][$i];
+			}
+		}
+
+		return [];
+	};
+	check('route between neighbouring columns is direct', $route('svc:web', 'svc:api'), ['svc:web', 'svc:api']);
+	check('route across a column goes through a waypoint', $route('users', 'svc:api'), ['users', 'wp:users:1', 'svc:api']);
+	check('every node and waypoint has a place', count($layout['positions']), count($graph['nodes']) + 1);
+	check('columns go left to right', $layout['positions']['users'][0] < $layout['positions']['svc:web'][0]
+		&& $layout['positions']['svc:web'][0] < $layout['positions']['svc:api'][0], true);
+	check('a waypoint sits in the column it crosses',
+		$layout['positions']['wp:users:1'][0] === $layout['positions']['svc:web'][0], true
+	);
+	check('a line starts at the edge of its node', str_starts_with(
+		ServiceMap::routePath(['a', 'b'], ['a' => [100, 50], 'b' => [300, 80]], ['a' => 20, 'b' => 10]), 'M121.0,50.0 C'
+	), true);
+
+	// One figure under a node: what is wrong now, else its traffic.
+	$figure = static fn(array $now, float $rpm = 12): array => ServiceMap::nodeFigure(['kind' => 'service', 'rpm' => $rpm,
+		'errors' => 0, 'requests' => 100, 'p95' => 1e7, 'now' => $now
+	]);
+	check('node figure healthy', $figure(['requests' => 10, 'errors' => 0, 'p95' => 1e7]), ['12/min', false]);
+	check('node figure errors', $figure(['requests' => 10, 'errors' => 2, 'p95' => 1e7]), ['20.0 % errors', true]);
+	check('node figure slow', $figure(['requests' => 10, 'errors' => 0, 'p95' => 2.7e9]), ['p95 2.7s', true]);
+
+	// Health with Zabbix problems: an Average problem makes a healthy service a problem, a Warning a warning.
+	$healthy = ['kind' => 'service', 'errors' => 0, 'requests' => 10, 'p95' => 1e7, 'now' => null];
+	check('health with problems', [
+		ServiceMap::nodeHealth($healthy),
+		ServiceMap::nodeHealth($healthy + ['problems' => ['severity' => 2, 'count' => 1]]),
+		ServiceMap::nodeHealth($healthy + ['problems' => ['severity' => 3, 'count' => 1]]),
+		ServiceMap::nodeHealth($healthy + ['problems' => ['severity' => 1, 'count' => 1]])
+	], ['ok', 'warn', 'bad', 'ok']);
+	$grouped = ZabbixProblems::group([
+		['eventid' => '1', 'objectid' => '9', 'name' => 'Queue is filling', 'severity' => '2', 'clock' => '100',
+			'tags' => [['tag' => 'service', 'value' => 'api'], ['tag' => 'scope', 'value' => 'x']]],
+		['eventid' => '2', 'objectid' => '9', 'name' => 'Down', 'severity' => '4', 'clock' => '90',
+			'tags' => [['tag' => 'service', 'value' => 'api']]],
+		['eventid' => '3', 'objectid' => '9', 'name' => 'Other', 'severity' => '5', 'clock' => '80',
+			'tags' => [['tag' => 'service', 'value' => 'unknown-service']]]
+	], ['api', 'web']);
+	check('problems by service tag', [array_keys($grouped), $grouped['api']['count'], $grouped['api']['severity'],
+		$grouped['api']['worst']], [['api'], 2, 4, 'Down']);
+
+	// Versions: latest first; deployed = first seen in the period while another one was there before.
+	$versions = ApmStats::groupVersions([
+		['service' => 'api', 'version' => '1.0', 'first' => 100, 'last' => 900, 'requests' => 30, 'errors' => 0, 'p95' => 1.0],
+		['service' => 'api', 'version' => '1.1', 'first' => 600, 'last' => 990, 'requests' => 10, 'errors' => 5, 'p95' => 2.0],
+		['service' => 'web', 'version' => '7', 'first' => 550, 'last' => 990, 'requests' => 10, 'errors' => 0, 'p95' => 1.0]
+	], 500);
+	check('versions order and deployment', array_map(static fn(array $v): array => [$v['version'], $v['deployed'],
+		round($v['share']), round($v['error_rate'])], $versions['api']), [['1.1', true, 25.0, 50.0], ['1.0', false, 75.0, 0.0]]
+	);
+	check('a first version is not a deployment', $versions['web'][0]['deployed'], false);
+	check('versions to compare', ServiceLoader::pickVersions($versions['api'], ['a' => '', 'b' => '']),
+		['a' => '1.1', 'b' => '1.0', 'all' => ['1.1', '1.0']]
+	);
+	check('one version: nothing to compare', ServiceLoader::pickVersions($versions['web'], ['a' => '', 'b' => '']), null);
+	check('errors of two versions', array_column(ServiceHtml::diffErrors([
+		['endpoint' => 'e', 'type' => '', 'message' => 'old', 'a' => 0, 'b' => 4],
+		['endpoint' => 'e', 'type' => '', 'message' => 'both', 'a' => 2, 'b' => 2],
+		['endpoint' => 'e', 'type' => '', 'message' => 'new', 'a' => 9, 'b' => 0]
+	]), 'where', 'message'), ['new' => 'a', 'both' => 'both', 'old' => 'b']);
+
+	// Tag analysis: values much more frequent among the outliers, largest difference first; attributes with many
+	// values (ids) and rare values are dropped.
+	$tag_rows = [
+		['key' => 'http.route', 'value' => '/slow', 'outliers' => 80, 'rest' => 50],
+		['key' => 'http.route', 'value' => '/fast', 'outliers' => 20, 'rest' => 950],
+		['key' => 'service.version', 'value' => '2.0', 'outliers' => 60, 'rest' => 100],
+		['key' => 'rare', 'value' => 'x', 'outliers' => 3, 'rest' => 0]
+	];
+	for ($i = 0; $i < 40; $i++) {
+		$tag_rows[] = ['key' => 'order.id', 'value' => 'o'.$i, 'outliers' => 10, 'rest' => 0];
+	}
+	$ranked = ApmStats::rankTags($tag_rows, 100, 1000);
+	check('tag analysis order', array_map(static fn(array $tag): string => $tag['key'].'='.$tag['value'], $ranked),
+		['http.route=/slow', 'service.version=2.0']
+	);
+	check('tag analysis shares', [round($ranked[0]['share_outliers']), round($ranked[0]['share_rest']), round($ranked[0]['lift'])],
+		[80.0, 5.0, 16.0]
+	);
+	check('tag analysis without outliers', ApmStats::rankTags($tag_rows, 0, 1000), []);
+
+	// Charts and time series.
+	check('chart scale', array_map([Chart::class, 'niceMax'], [0, 0.07, 3, 42, 180, 1000]), [0.0, 0.1, 5.0, 50.0, 200.0, 1000.0]);
+	check('time series step', [ApmStats::timeseriesStep(0, 3600), ApmStats::timeseriesStep(0, 86400), ApmStats::timeseriesStep(0, 300)],
+		[60, 1440, 60]
+	);
+	check('neighbours of a service', array_map(static fn(array $rows): array => array_column($rows, 'name'),
+		ServiceLoader::pickNeighbours($graph, 'web')), ['callers' => ['Users'], 'callees' => ['api', 'pay.example.com']]
+	);
 
 	// State of an error group: resolved when it stopped, new when never seen before, back after a gap, else active.
 	check('error state resolved', ApmStats::errorState(0, 0, 1000, 900), ApmStats::STATE_RESOLVED);

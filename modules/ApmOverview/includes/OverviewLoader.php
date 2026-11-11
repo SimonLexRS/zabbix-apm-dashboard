@@ -56,6 +56,14 @@ class OverviewLoader {
 					$data['calls'] = $stats->getServiceCalls($time_from, $time_till);
 					$data['call_minutes'] = max(1, ($call_till - $call_from) / SEC_PER_MIN);
 					$data['truncated'] = array_keys(array_filter($stats->truncated));
+					// Open problems in Zabbix: of each service (tag service = name) and of the application host.
+					$data['problems'] = ZabbixProblems::forServices(array_column($data['services'], 'service'));
+					$app_host = $filter['application'] !== null && $filter['application'] !== ''
+						? self::findHost($filter['application'])
+						: null;
+					$data['app_problems'] = $app_host !== null
+						? ['host' => $app_host, 'problems' => ZabbixProblems::forHosts([$app_host['hostid']])]
+						: null;
 					break;
 
 				case OverviewHtml::TAB_SERVICES:
