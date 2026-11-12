@@ -85,6 +85,7 @@ python3 scripts/verify-app.py shop              # all checks passed
 | Verlo funcionar antes de tocar mi Zabbix | [Laboratorio en Docker](docs/lab.es.md), en 5 minutos |
 | Instalarlo en varias máquinas u otra distribución | [Instalación de referencia](docs/installation.es.md) |
 | Instalar solo los módulos | [Módulos](docs/install-module.es.md) |
+| Instalarlo en Dokploy o Docker con Zabbix 8.0, ClickHouse y el proxy APM listos | [Dokploy y Docker con Zabbix-Demo](docs/install-module.es.md#dokploy-y-docker-con-zabbix-demo) |
 | Conectar mi aplicación | [Agregar una aplicación](docs/add-application.es.md) y [ejemplos por stack](#ejemplos-por-stack) |
 | Verlo con aplicaciones de ejemplo (API en Go, tienda, hoteles) | [Aplicaciones de ejemplo](examples/demo-apps/README.es.md), en Docker |
 | Provocar fallos a mano y verlos en Zabbix (base de datos lenta, compras fallidas, un servicio caído) | [Fault Shop](examples/stacks/fault-shop/README.es.md): `sudo ./scripts/setup.sh shop <IP>` |

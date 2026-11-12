@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**Dokploy and Docker with Zabbix-Demo** ([install-module.md](docs/install-module.md#dokploy-and-docker-with-zabbix-demo)).
+[Zabbix-Demo](https://github.com/SimonLexRS/Zabbix-Demo) installs the modules from git on every deploy
+(`ZBX_MODULES_GIT`) next to Zabbix 8.0, ClickHouse and the native APM proxy; the guide covers Dokploy, plain Docker,
+upgrades and removal.
+
+## Unreleased
+
 **Real user monitoring as Zabbix problems.** The page showed what fails in the browser, but nothing told you: there
 were no items or triggers for it.
 

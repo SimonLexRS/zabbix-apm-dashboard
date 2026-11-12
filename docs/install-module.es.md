@@ -124,6 +124,70 @@ Monta las carpetas en el servicio web y sigue desde el paso 2 ([ejemplo completo
       - ./zabbix-apm-dashboard/modules/ApmServiceMap:/usr/share/zabbix/modules/ApmServiceMap:ro
 ```
 
+## Dokploy y Docker con Zabbix-Demo
+
+[Zabbix-Demo](https://github.com/SimonLexRS/Zabbix-Demo) es un `docker-compose.yml` listo para
+[Dokploy](https://dokploy.com) con Zabbix 8.0 LTS, PostgreSQL, ClickHouse, el proxy APM nativo y el servidor MCP. Instala
+estos módulos desde git en cada deploy: no hace falta copiarlos ni ejecutar `install.sh`.
+
+```mermaid
+flowchart LR
+    A["ZBX_MODULES_GIT"] --> B["modules-init (git clone)"]
+    B --> C[("volumen zabbix-modules")]
+    C -->|"/usr/share/zabbix/modules"| D["zabbix-web"]
+    E["Tu aplicación"] -->|"OTLP gRPC :4317"| F["zabbix-proxy-apm"]
+    F --> G[("ClickHouse, tablas otel_*")]
+    G --> D
+```
+
+El proxy APM de Zabbix escribe las mismas tablas `otel_*` que el OpenTelemetry Collector, así que los módulos funcionan
+sin Collector. Solo acepta OTLP **gRPC**: para RUM (OTLP/HTTP desde el navegador) pon un Collector delante.
+
+### En Dokploy
+
+1. **Create Service → Compose**: provider GitHub, repo `SimonLexRS/Zabbix-Demo`, rama `main`, Compose Path
+   `./docker-compose.yml`.
+2. **Environment**: pega el [`.env.example`](https://github.com/SimonLexRS/Zabbix-Demo/blob/main/.env.example) de
+   Zabbix-Demo, cambia las contraseñas y deja la línea de módulos:
+
+   ```sh
+   ZBX_MODULES_GIT=https://github.com/SimonLexRS/zabbix-apm-dashboard.git
+   ```
+
+   Para fijar una versión, agrega `#<rama-o-tag>` a la URL. Puedes listar más repos de módulos separados por espacio.
+3. **Domains**: `zabbix-web`, puerto 8080 (y `zabbix-mcp-server`, puerto 8443, si usas MCP).
+4. **Deploy**.
+
+✅ **Comprobación:** el log del servicio `modules-init` termina con
+`Instalado: https://github.com/SimonLexRS/zabbix-apm-dashboard.git → ApmOverview ApmServiceHealth ApmServiceMap`.
+
+Luego sigue la sección *Después del primer deploy* del [README de Zabbix-Demo](https://github.com/SimonLexRS/Zabbix-Demo#después-del-primer-deploy-una-sola-vez)
+(proxy APM y fuente de datos con `http://clickhouse:8123`, base `zabbix` y el usuario de ClickHouse del Environment) y
+desde aquí el [paso 2](#paso-2-habilitarlos), con `ZABBIX_URL=https://<tu-dominio-de-zabbix>`, y el
+[paso 4](#paso-4-ver-datos-y-dar-acceso). El paso 3 ya queda hecho con esa fuente de datos.
+
+### Con Docker, sin Dokploy
+
+```sh
+git clone https://github.com/SimonLexRS/Zabbix-Demo.git && cd Zabbix-Demo
+cp .env.example .env          # cambia las contraseñas; ZBX_MODULES_GIT ya apunta a este repo
+docker compose up -d
+docker compose logs modules-init
+docker compose exec zabbix-web ls /usr/share/zabbix/modules   # ApmOverview ApmServiceHealth ApmServiceMap
+```
+
+En local, publica el puerto 8080 de `zabbix-web` (o abre su IP de contenedor) para entrar a la UI.
+
+### Actualizar
+
+- **Redeploy** en Dokploy, o `docker compose up -d --force-recreate modules-init zabbix-web` en Docker: `modules-init`
+  vuelve a clonar y rehace el volumen. Sin `#ref` toma el último commit de `main`.
+- Recarga la página; si la versión trae módulos nuevos, **Scan directory** de nuevo.
+- Para quitarlos: deshabilítalos en **Modules**, borra la URL de `ZBX_MODULES_GIT` (déjala vacía) y Redeploy.
+
+Detalles de `ZBX_MODULES_GIT` (repos privados, varios repos, errores): README de Zabbix-Demo,
+[Módulos del frontend desde git](https://github.com/SimonLexRS/Zabbix-Demo#módulos-del-frontend-desde-git).
+
 ## Actualizar y desinstalar
 
 ```sh
