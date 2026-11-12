@@ -67,6 +67,33 @@ macros de intervalo aceptan el contexto de la señal: `{$OTLP.FREQUENCY:traces}`
 El template trae además un dashboard de host (**Overview**: uptime, % de error, duración por estado, distribución de
 estados, número de métricas, problemas y severidades de log): **Monitoring → Hosts → apm-&lt;app&gt; → Dashboards**.
 
+## Real user monitoring: el navegador
+
+El template oficial no mira el navegador. Este lo añade, para las aplicaciones cuyas páginas envían spans con el SDK web
+de OpenTelemetry (`telemetry.sdk.language = webjs`, ver [rum.es.md](rum.es.md)); sin ellos no se descubre nada.
+
+| Regla de descubrimiento | Descubre | Items por fila |
+|---|---|---|
+| Browser: pages | Servicio y página, a partir de las cargas de página (`documentLoad`) | Cargas de página; errores de la propia página |
+| Browser: requests | Servicio, host y ruta, a partir de las peticiones del navegador (fetch, XMLHttpRequest) | Peticiones; peticiones fallidas |
+
+| Trigger (Average) | Expresión | Por defecto |
+|---|---|---|
+| Browser: errors on the page *ruta* of *servicio* | `sum(errores, 5m)` > `{$BROWSER.ERRORS.MAX:"<ruta>"}` | 2 |
+| Browser: requests to *host/ruta* fail in *servicio* | `sum(peticiones fallidas, 5m)` > `{$BROWSER.REQUESTS.FAILED.MAX:"<ruta>"}` | 3 |
+
+- **Cuatro items Telemetry query** leen los spans del navegador agrupados por servicio y URL (`url.full`, o `http.url`
+  en las peticiones): cargas de página, errores de página (spans fallidos que no son peticiones, la regla que usa el
+  módulo), peticiones y peticiones fallidas. Un paso JavaScript convierte las URL en las páginas que muestra el módulo:
+  sin query string y con los segmentos variables como `:id` (`/product/42` y `/product/57` son una página). Se
+  conservan como máximo 100 rutas por consulta, las de más tráfico.
+- Páginas y peticiones se descubren **a partir de todo el tráfico, no de los fallos**: cada una tiene su contador en 0
+  antes de fallar, y un minuto sin fallos es un 0, así que los problemas se cierran solos.
+- Cada trigger lleva el tag **`service` = el servicio del navegador**, así que el módulo muestra el problema en ese
+  servicio y en **Real user monitoring → Errores**, y un enlace, **APM real user monitoring**, en el menú del problema.
+- El umbral toma la ruta como contexto: `{$BROWSER.ERRORS.MAX:"/checkout"}` = `0` abre con el primer error ahí.
+- Los items de una página sin visitas siguen habilitados y se eliminan a los 7 días.
+
 ## Generación y actualizaciones de Zabbix
 
 El template se genera; nunca se edita a mano:
@@ -87,6 +114,7 @@ El generador hace lo siguiente:
 - suma los registros de log de cada rango de severidad en lugar de leer solo su primera fila;
 - reescribe el porcentaje de error para que no pueda dividir por cero;
 - añade *No spans received*, `{$SPAN.NODATA}` y los enlaces de los triggers;
+- añade los items, reglas de descubrimiento y triggers del navegador (real user monitoring);
 - quita las columnas en bruto que agrupan por la columna agregada;
 - asigna UUID versión 4 deterministas.
 

@@ -85,6 +85,9 @@ class RumLoader {
 						'time_till' => $time_till, 'browser' => true
 					];
 					OverviewLoader::section($data, 'requests', [], fn() => $stats->getRequests($time_from, $time_till));
+					OverviewLoader::section($data, 'problems', self::problems(null, []),
+						fn() => self::problems($filter['application'], $stats->getBrowserServices($time_from, $time_till))
+					);
 					break;
 
 				case self::TAB_SESSIONS:
@@ -102,6 +105,32 @@ class RumLoader {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * Open Zabbix problems of the browser side of an application: those tagged with one of its browser services
+	 * (service = name) and those of the Zabbix host of the application. Same shape as ServiceLoader::problems().
+	 *
+	 * @param string[] $services  Services that send browser spans.
+	 */
+	public static function problems(?string $application, array $services): array {
+		$own = [];
+
+		foreach (ZabbixProblems::forServices($services) as $summary) {
+			foreach ($summary['problems'] as $problem) {
+				$own[$problem['eventid']] = $problem;
+			}
+		}
+
+		$app_host = $application !== null && $application !== '' ? OverviewLoader::findHost($application) : null;
+
+		return [
+			'service' => ZabbixProblems::summarize(array_values($own)),
+			'application' => $app_host !== null
+				? ['host' => $app_host, 'problems' => ZabbixProblems::forHosts([$app_host['hostid']])]
+				: null,
+			'hosts' => []
+		];
 	}
 
 	/**

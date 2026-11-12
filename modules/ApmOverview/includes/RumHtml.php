@@ -308,7 +308,14 @@ class RumHtml {
 			]);
 		}
 
+		$problems = array_key_exists('problems', $data)
+			? ServiceHtml::problems($data['problems'], I18n::t('Problems of the browser services (tag service)'))
+			: null;
+
 		return new CDiv([
+			$problems !== null
+				? (new CSection($problems))->setHeader(new CTag('h4', true, I18n::t('Open Zabbix problems')))
+				: null,
 			(new CSection(OverviewHtml::errorTable($data['errors'], $data['error_ctx'], $data['truncated'] ?? [])))
 				->setHeader(new CTag('h4', true, I18n::t('Errors in the browser'))),
 			!$data['errors'] ? OverviewHtml::hint(I18n::t('Errors of the page itself appear when the browser sends them: see the error capture step in How it works.')) : null,

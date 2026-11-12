@@ -248,6 +248,18 @@ class RumStats extends ApmStats {
 	}
 
 	/**
+	 * Services that sent browser spans in the period: the ones a Zabbix problem can be tagged with (service = name).
+	 *
+	 * @return string[]
+	 */
+	public function getBrowserServices(int $time_from, int $time_till, int $limit = 50): array {
+		return array_map(static fn(array $row): string => (string) $row['service'], $this->fetch(
+			'SELECT DISTINCT ServiceName AS service'.$this->browserWhere().' ORDER BY service LIMIT '.$limit,
+			$time_from, $time_till
+		));
+	}
+
+	/**
 	 * Requests made by the browser (fetch, XMLHttpRequest), by method, host, path and status class: count, failed,
 	 * p75 (ns) and the latest trace, to open it.
 	 */

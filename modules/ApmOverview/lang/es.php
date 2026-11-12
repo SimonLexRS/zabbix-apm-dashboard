@@ -655,6 +655,8 @@ return [
 	'Why do some requests fail?' => '¿Por qué algunas peticiones fallan?',
 	'Why slow' => 'Por qué es lento',
 	'Why slow, why failing' => 'Por qué es lento, por qué falla',
+	'Open Zabbix problems' => 'Problemas abiertos de Zabbix',
+	'Problems of the browser services (tag service)' => 'Problemas de los servicios del navegador (etiqueta service)',
 	'Yesterday' => 'Ayer',
 	'Zabbix problems: %d (%s)' => 'Problemas de Zabbix: %d (%s)',
 	'Zabbix: %s' => 'Zabbix: %s',

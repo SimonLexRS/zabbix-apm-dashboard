@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+**Real user monitoring as Zabbix problems.** The page showed what fails in the browser, but nothing told you: there
+were no items or triggers for it.
+
+- The template *OpenTelemetry application by OTLP* discovers the **pages** and the **requests of the browser** (per
+  service, from all the traffic) with their page loads, page errors, requests and failed requests, and opens a problem
+  when a page raises errors or a request keeps failing (`{$BROWSER.ERRORS.MAX}`, `{$BROWSER.REQUESTS.FAILED.MAX}`, with
+  the path as context). Pages are the ones the module shows (`/product/:id`). The triggers carry the tag `service` and
+  a link to Real user monitoring. See [docs/apm-template.md](docs/apm-template.md).
+- **Real user monitoring → Errors** lists the open Zabbix problems tagged with the browser services of the application,
+  and those of its host, above the error groups.
+
 ## 2.6.0
 
 **Fault Shop: a test store you break by hand** (`examples/stacks/fault-shop`, `sudo ./scripts/setup.sh shop <IP>`).

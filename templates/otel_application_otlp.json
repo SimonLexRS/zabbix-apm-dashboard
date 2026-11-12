@@ -1044,6 +1044,323 @@
                                 "url_name": "APM overview"
                             }
                         ]
+                    },
+                    {
+                        "uuid": "5746c34addbc4a0ba660fe0edf98a8ea",
+                        "name": "Browser: Get page loads",
+                        "type": "TELEMETRY_QUERY",
+                        "key": "otlp.browser.views.get",
+                        "delay": "{$OTLP.FREQUENCY:traces}",
+                        "history": "0",
+                        "value_type": "JSON",
+                        "description": "Page loads (documentLoad spans of the OpenTelemetry web SDK) per service and page.",
+                        "preprocessing": [
+                            {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "[]"
+                            },
+                            {
+                                "type": "JAVASCRIPT",
+                                "parameters": [
+                                    "var rows = JSON.parse(value), newest = null, groups = {}, result = [], i, m, url, host, parts, path, key;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result: ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tif (newest === null || Number(rows[i].clock) > newest) {\n\t\tnewest = Number(rows[i].clock);\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\turl = rows[i]['SpanAttributes.url.full'] || rows[i]['SpanAttributes.http.url'] || '';\n\tif (url === '' || Number(rows[i].clock) !== newest || isNaN(Number(rows[i].count))) {\n\t\tcontinue;\n\t}\n\tm = /^[a-z][a-z0-9+.-]*:\\/\\/([^\\/?#]*)([^?#]*)/i.exec(url);\n\thost = m ? m[1] : '';\n\tparts = (m ? m[2] : url.split(/[?#]/)[0]).split('/');\n\tpath = '';\n\tfor (var j = 0; j < parts.length; j++) {\n\t\tif (parts[j] === '') {\n\t\t\tcontinue;\n\t\t}\n\t\tpath += '/' + (/^[0-9]+$/.test(parts[j])\n\t\t\t|| (parts[j].length >= 6 && /^[A-Za-z0-9_-]+$/.test(parts[j]) && /[0-9]/.test(parts[j]))\n\t\t\t|| /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(parts[j])\n\t\t\t? ':id' : parts[j]);\n\t}\n\tpath = path || '/';\n\tif (/['\"\\\\]/.test(host + path)) {\n\t\tcontinue;\n\t}\n\tkey = rows[i].ServiceName + '\\n' + host + '\\n' + path;\n\tif (!groups[key]) {\n\t\tgroups[key] = {service: rows[i].ServiceName, host: host, path: path, count: 0};\n\t\tresult.push(groups[key]);\n\t}\n\tgroups[key].count += Number(rows[i].count);\n}\nresult.sort(function (a, b) {\n\treturn b.count - a.count;\n});\nreturn JSON.stringify(result.slice(0, 100));"
+                                ]
+                            }
+                        ],
+                        "time_shift": "{$OTLP.TIMESHIFT:traces}",
+                        "lookback_limit": "{$OTLP.LOOPBACK:traces}",
+                        "granularity": "{$OTLP.GRANULARITY:traces}",
+                        "query": {
+                            "columns": [
+                                {
+                                    "column": "ServiceName"
+                                },
+                                {
+                                    "column": "SpanAttributes",
+                                    "attribute_key": "url.full"
+                                }
+                            ],
+                            "aggregated_columns": [
+                                {
+                                    "alias": "count"
+                                }
+                            ],
+                            "filter": {
+                                "evaltype": "AND",
+                                "conditions": [
+                                    {
+                                        "column": "SpanName",
+                                        "value": "documentLoad"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "telemetry.sdk.language",
+                                        "value": "webjs"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "service.namespace",
+                                        "value": "{$OTLP.NAMESPACE}"
+                                    }
+                                ]
+                            }
+                        },
+                        "tags": [
+                            {
+                                "tag": "apm",
+                                "value": "traces"
+                            },
+                            {
+                                "tag": "component",
+                                "value": "raw"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "067aae6c249b424ca6656b09c2bc1f0c",
+                        "name": "Browser: Get page errors",
+                        "type": "TELEMETRY_QUERY",
+                        "key": "otlp.browser.errors.get",
+                        "delay": "{$OTLP.FREQUENCY:traces}",
+                        "history": "0",
+                        "value_type": "JSON",
+                        "description": "Errors of the page itself per service and page: failed browser spans that are not requests (uncaught exceptions and rejected promises, sent as spans with status Error and the url.full attribute).",
+                        "preprocessing": [
+                            {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "[]"
+                            },
+                            {
+                                "type": "JAVASCRIPT",
+                                "parameters": [
+                                    "var rows = JSON.parse(value), newest = null, groups = {}, result = [], i, m, url, host, parts, path, key;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result: ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tif (newest === null || Number(rows[i].clock) > newest) {\n\t\tnewest = Number(rows[i].clock);\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\turl = rows[i]['SpanAttributes.url.full'] || rows[i]['SpanAttributes.http.url'] || '';\n\tif (url === '' || Number(rows[i].clock) !== newest || isNaN(Number(rows[i].count))) {\n\t\tcontinue;\n\t}\n\tm = /^[a-z][a-z0-9+.-]*:\\/\\/([^\\/?#]*)([^?#]*)/i.exec(url);\n\thost = m ? m[1] : '';\n\tparts = (m ? m[2] : url.split(/[?#]/)[0]).split('/');\n\tpath = '';\n\tfor (var j = 0; j < parts.length; j++) {\n\t\tif (parts[j] === '') {\n\t\t\tcontinue;\n\t\t}\n\t\tpath += '/' + (/^[0-9]+$/.test(parts[j])\n\t\t\t|| (parts[j].length >= 6 && /^[A-Za-z0-9_-]+$/.test(parts[j]) && /[0-9]/.test(parts[j]))\n\t\t\t|| /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(parts[j])\n\t\t\t? ':id' : parts[j]);\n\t}\n\tpath = path || '/';\n\tif (/['\"\\\\]/.test(host + path)) {\n\t\tcontinue;\n\t}\n\tkey = rows[i].ServiceName + '\\n' + host + '\\n' + path;\n\tif (!groups[key]) {\n\t\tgroups[key] = {service: rows[i].ServiceName, host: host, path: path, count: 0};\n\t\tresult.push(groups[key]);\n\t}\n\tgroups[key].count += Number(rows[i].count);\n}\nresult.sort(function (a, b) {\n\treturn b.count - a.count;\n});\nreturn JSON.stringify(result.slice(0, 100));"
+                                ]
+                            }
+                        ],
+                        "time_shift": "{$OTLP.TIMESHIFT:traces}",
+                        "lookback_limit": "{$OTLP.LOOPBACK:traces}",
+                        "granularity": "{$OTLP.GRANULARITY:traces}",
+                        "query": {
+                            "columns": [
+                                {
+                                    "column": "ServiceName"
+                                },
+                                {
+                                    "column": "SpanAttributes",
+                                    "attribute_key": "url.full"
+                                }
+                            ],
+                            "aggregated_columns": [
+                                {
+                                    "alias": "count"
+                                }
+                            ],
+                            "filter": {
+                                "evaltype": "AND",
+                                "conditions": [
+                                    {
+                                        "column": "StatusCode",
+                                        "value": "Error"
+                                    },
+                                    {
+                                        "column": "SpanKind",
+                                        "value": "Client",
+                                        "operator": "NOT_EQUAL"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "telemetry.sdk.language",
+                                        "value": "webjs"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "service.namespace",
+                                        "value": "{$OTLP.NAMESPACE}"
+                                    }
+                                ]
+                            }
+                        },
+                        "tags": [
+                            {
+                                "tag": "apm",
+                                "value": "traces"
+                            },
+                            {
+                                "tag": "component",
+                                "value": "raw"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "ddb89602296448959d2918e41ac7dcfc",
+                        "name": "Browser: Get requests",
+                        "type": "TELEMETRY_QUERY",
+                        "key": "otlp.browser.requests.get",
+                        "delay": "{$OTLP.FREQUENCY:traces}",
+                        "history": "0",
+                        "value_type": "JSON",
+                        "description": "Requests made by the browser (fetch, XMLHttpRequest) per service, host and path.",
+                        "preprocessing": [
+                            {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "[]"
+                            },
+                            {
+                                "type": "JAVASCRIPT",
+                                "parameters": [
+                                    "var rows = JSON.parse(value), newest = null, groups = {}, result = [], i, m, url, host, parts, path, key;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result: ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tif (newest === null || Number(rows[i].clock) > newest) {\n\t\tnewest = Number(rows[i].clock);\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\turl = rows[i]['SpanAttributes.url.full'] || rows[i]['SpanAttributes.http.url'] || '';\n\tif (url === '' || Number(rows[i].clock) !== newest || isNaN(Number(rows[i].count))) {\n\t\tcontinue;\n\t}\n\tm = /^[a-z][a-z0-9+.-]*:\\/\\/([^\\/?#]*)([^?#]*)/i.exec(url);\n\thost = m ? m[1] : '';\n\tparts = (m ? m[2] : url.split(/[?#]/)[0]).split('/');\n\tpath = '';\n\tfor (var j = 0; j < parts.length; j++) {\n\t\tif (parts[j] === '') {\n\t\t\tcontinue;\n\t\t}\n\t\tpath += '/' + (/^[0-9]+$/.test(parts[j])\n\t\t\t|| (parts[j].length >= 6 && /^[A-Za-z0-9_-]+$/.test(parts[j]) && /[0-9]/.test(parts[j]))\n\t\t\t|| /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(parts[j])\n\t\t\t? ':id' : parts[j]);\n\t}\n\tpath = path || '/';\n\tif (/['\"\\\\]/.test(host + path)) {\n\t\tcontinue;\n\t}\n\tkey = rows[i].ServiceName + '\\n' + host + '\\n' + path;\n\tif (!groups[key]) {\n\t\tgroups[key] = {service: rows[i].ServiceName, host: host, path: path, count: 0};\n\t\tresult.push(groups[key]);\n\t}\n\tgroups[key].count += Number(rows[i].count);\n}\nresult.sort(function (a, b) {\n\treturn b.count - a.count;\n});\nreturn JSON.stringify(result.slice(0, 100));"
+                                ]
+                            }
+                        ],
+                        "time_shift": "{$OTLP.TIMESHIFT:traces}",
+                        "lookback_limit": "{$OTLP.LOOPBACK:traces}",
+                        "granularity": "{$OTLP.GRANULARITY:traces}",
+                        "query": {
+                            "columns": [
+                                {
+                                    "column": "ServiceName"
+                                },
+                                {
+                                    "column": "SpanAttributes",
+                                    "attribute_key": "url.full"
+                                },
+                                {
+                                    "column": "SpanAttributes",
+                                    "attribute_key": "http.url"
+                                }
+                            ],
+                            "aggregated_columns": [
+                                {
+                                    "alias": "count"
+                                }
+                            ],
+                            "filter": {
+                                "evaltype": "AND",
+                                "conditions": [
+                                    {
+                                        "column": "SpanKind",
+                                        "value": "Client"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "telemetry.sdk.language",
+                                        "value": "webjs"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "service.namespace",
+                                        "value": "{$OTLP.NAMESPACE}"
+                                    }
+                                ]
+                            }
+                        },
+                        "tags": [
+                            {
+                                "tag": "apm",
+                                "value": "traces"
+                            },
+                            {
+                                "tag": "component",
+                                "value": "raw"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "293d494e270046c8b8da12a81cc38bf6",
+                        "name": "Browser: Get failed requests",
+                        "type": "TELEMETRY_QUERY",
+                        "key": "otlp.browser.requests.failed.get",
+                        "delay": "{$OTLP.FREQUENCY:traces}",
+                        "history": "0",
+                        "value_type": "JSON",
+                        "description": "Failed requests made by the browser per service, host and path.",
+                        "preprocessing": [
+                            {
+                                "type": "CHECK_NOT_SUPPORTED",
+                                "parameters": [
+                                    "0",
+                                    "^No value$"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "[]"
+                            },
+                            {
+                                "type": "JAVASCRIPT",
+                                "parameters": [
+                                    "var rows = JSON.parse(value), newest = null, groups = {}, result = [], i, m, url, host, parts, path, key;\nif (!Array.isArray(rows)) {\n\tthrow 'Unexpected result: ' + value.substring(0, 200);\n}\nfor (i = 0; i < rows.length; i++) {\n\tif (newest === null || Number(rows[i].clock) > newest) {\n\t\tnewest = Number(rows[i].clock);\n\t}\n}\nfor (i = 0; i < rows.length; i++) {\n\turl = rows[i]['SpanAttributes.url.full'] || rows[i]['SpanAttributes.http.url'] || '';\n\tif (url === '' || Number(rows[i].clock) !== newest || isNaN(Number(rows[i].count))) {\n\t\tcontinue;\n\t}\n\tm = /^[a-z][a-z0-9+.-]*:\\/\\/([^\\/?#]*)([^?#]*)/i.exec(url);\n\thost = m ? m[1] : '';\n\tparts = (m ? m[2] : url.split(/[?#]/)[0]).split('/');\n\tpath = '';\n\tfor (var j = 0; j < parts.length; j++) {\n\t\tif (parts[j] === '') {\n\t\t\tcontinue;\n\t\t}\n\t\tpath += '/' + (/^[0-9]+$/.test(parts[j])\n\t\t\t|| (parts[j].length >= 6 && /^[A-Za-z0-9_-]+$/.test(parts[j]) && /[0-9]/.test(parts[j]))\n\t\t\t|| /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(parts[j])\n\t\t\t? ':id' : parts[j]);\n\t}\n\tpath = path || '/';\n\tif (/['\"\\\\]/.test(host + path)) {\n\t\tcontinue;\n\t}\n\tkey = rows[i].ServiceName + '\\n' + host + '\\n' + path;\n\tif (!groups[key]) {\n\t\tgroups[key] = {service: rows[i].ServiceName, host: host, path: path, count: 0};\n\t\tresult.push(groups[key]);\n\t}\n\tgroups[key].count += Number(rows[i].count);\n}\nresult.sort(function (a, b) {\n\treturn b.count - a.count;\n});\nreturn JSON.stringify(result.slice(0, 100));"
+                                ]
+                            }
+                        ],
+                        "time_shift": "{$OTLP.TIMESHIFT:traces}",
+                        "lookback_limit": "{$OTLP.LOOPBACK:traces}",
+                        "granularity": "{$OTLP.GRANULARITY:traces}",
+                        "query": {
+                            "columns": [
+                                {
+                                    "column": "ServiceName"
+                                },
+                                {
+                                    "column": "SpanAttributes",
+                                    "attribute_key": "url.full"
+                                },
+                                {
+                                    "column": "SpanAttributes",
+                                    "attribute_key": "http.url"
+                                }
+                            ],
+                            "aggregated_columns": [
+                                {
+                                    "alias": "count"
+                                }
+                            ],
+                            "filter": {
+                                "evaltype": "AND",
+                                "conditions": [
+                                    {
+                                        "column": "SpanKind",
+                                        "value": "Client"
+                                    },
+                                    {
+                                        "column": "StatusCode",
+                                        "value": "Error"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "telemetry.sdk.language",
+                                        "value": "webjs"
+                                    },
+                                    {
+                                        "column": "ResourceAttributes",
+                                        "attribute_key": "service.namespace",
+                                        "value": "{$OTLP.NAMESPACE}"
+                                    }
+                                ]
+                            }
+                        },
+                        "tags": [
+                            {
+                                "tag": "apm",
+                                "value": "traces"
+                            },
+                            {
+                                "tag": "component",
+                                "value": "raw"
+                            }
+                        ]
                     }
                 ],
                 "tags": [
@@ -1061,6 +1378,16 @@
                     }
                 ],
                 "macros": [
+                    {
+                        "macro": "{$BROWSER.ERRORS.MAX}",
+                        "value": "2",
+                        "description": "Errors of a page in 5 minutes above which its problem opens. Context: the page, e.g. {$BROWSER.ERRORS.MAX:\"/checkout\"}."
+                    },
+                    {
+                        "macro": "{$BROWSER.REQUESTS.FAILED.MAX}",
+                        "value": "3",
+                        "description": "Failed browser requests to one path in 5 minutes above which its problem opens. Context: the path, e.g. {$BROWSER.REQUESTS.FAILED.MAX:\"/api/pay/:id\"}."
+                    },
                     {
                         "macro": "{$LOG.SEVERITY.ERROR}",
                         "value": "5",
@@ -1793,6 +2120,222 @@
                                         ]
                                     }
                                 ]
+                            }
+                        ]
+                    }
+                ],
+                "discovery_rules": [
+                    {
+                        "uuid": "1c3c3e4f6ff646158756d5326e03c81c",
+                        "name": "Browser: pages",
+                        "type": "DEPENDENT",
+                        "key": "otlp.browser.pages.discovery",
+                        "description": "Pages loaded in real browsers, from the page loads: every page has its error count, 0 until it fails.",
+                        "lifetime": "7d",
+                        "enabled_lifetime_type": "DISABLE_NEVER",
+                        "item_prototypes": [
+                            {
+                                "uuid": "803d8e9919e84db4924eb0d0a7665921",
+                                "name": "Browser {#SERVICE}: page loads of {#PATH}",
+                                "type": "DEPENDENT",
+                                "key": "otlp.browser.page.views[\"{#SERVICE}\",\"{#PATH}\"]",
+                                "description": "Page loads in the interval.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$[?(@.service=='{#SERVICE}' && @.path=='{#PATH}')].count.first()"
+                                        ],
+                                        "error_handler": "CUSTOM_VALUE",
+                                        "error_handler_params": "0"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "otlp.browser.views.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "browser"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "2ae27d8856f945008171dd0a8f01a757",
+                                "name": "Browser {#SERVICE}: errors on {#PATH}",
+                                "type": "DEPENDENT",
+                                "key": "otlp.browser.page.errors[\"{#SERVICE}\",\"{#PATH}\"]",
+                                "description": "Errors of the page itself in the interval.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$[?(@.service=='{#SERVICE}' && @.path=='{#PATH}')].count.first()"
+                                        ],
+                                        "error_handler": "CUSTOM_VALUE",
+                                        "error_handler_params": "0"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "otlp.browser.errors.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "browser"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ],
+                                "trigger_prototypes": [
+                                    {
+                                        "uuid": "a2a1154d0ee1413e87c814e647e0ae0a",
+                                        "expression": "sum(/OpenTelemetry application by OTLP/otlp.browser.page.errors[\"{#SERVICE}\",\"{#PATH}\"],5m)>{$BROWSER.ERRORS.MAX:\"{#PATH}\"}",
+                                        "name": "Browser: errors on the page {#PATH} of {#SERVICE}",
+                                        "priority": "AVERAGE",
+                                        "description": "The page raised more than {$BROWSER.ERRORS.MAX} errors (uncaught exceptions, rejected promises) in 5 minutes in the browsers of its users. The link opens them, grouped, with the sessions affected.",
+                                        "url": "zabbix.php?action=apm.rum&tab=errors&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                        "url_name": "APM real user monitoring",
+                                        "tags": [
+                                            {
+                                                "tag": "scope",
+                                                "value": "availability"
+                                            },
+                                            {
+                                                "tag": "service",
+                                                "value": "{#SERVICE}"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "otlp.browser.views.get"
+                        },
+                        "lld_macro_paths": [
+                            {
+                                "lld_macro": "{#SERVICE}",
+                                "path": "$.service"
+                            },
+                            {
+                                "lld_macro": "{#PATH}",
+                                "path": "$.path"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "9d0832fd1e6c4ae6862b74ada95739d7",
+                        "name": "Browser: requests",
+                        "type": "DEPENDENT",
+                        "key": "otlp.browser.requests.discovery",
+                        "description": "Requests made by real browsers, from all of them: every request has its failed count, 0 until it fails.",
+                        "lifetime": "7d",
+                        "enabled_lifetime_type": "DISABLE_NEVER",
+                        "item_prototypes": [
+                            {
+                                "uuid": "16f95a2d089b4cc7b78e0fee1878396f",
+                                "name": "Browser {#SERVICE}: requests to {#HOST}{#PATH}",
+                                "type": "DEPENDENT",
+                                "key": "otlp.browser.request.count[\"{#SERVICE}\",\"{#HOST}\",\"{#PATH}\"]",
+                                "description": "Requests in the interval.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$[?(@.service=='{#SERVICE}' && @.host=='{#HOST}' && @.path=='{#PATH}')].count.first()"
+                                        ],
+                                        "error_handler": "CUSTOM_VALUE",
+                                        "error_handler_params": "0"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "otlp.browser.requests.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "browser"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "963ad0be19454b8d952991dc10f7ff3f",
+                                "name": "Browser {#SERVICE}: failed requests to {#HOST}{#PATH}",
+                                "type": "DEPENDENT",
+                                "key": "otlp.browser.request.failed[\"{#SERVICE}\",\"{#HOST}\",\"{#PATH}\"]",
+                                "description": "Failed requests in the interval.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$[?(@.service=='{#SERVICE}' && @.host=='{#HOST}' && @.path=='{#PATH}')].count.first()"
+                                        ],
+                                        "error_handler": "CUSTOM_VALUE",
+                                        "error_handler_params": "0"
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "otlp.browser.requests.failed.get"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "browser"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    }
+                                ],
+                                "trigger_prototypes": [
+                                    {
+                                        "uuid": "95b7b0554e25409faef7c530b9588cb6",
+                                        "expression": "sum(/OpenTelemetry application by OTLP/otlp.browser.request.failed[\"{#SERVICE}\",\"{#HOST}\",\"{#PATH}\"],5m)>{$BROWSER.REQUESTS.FAILED.MAX:\"{#PATH}\"}",
+                                        "name": "Browser: requests to {#HOST}{#PATH} fail in {#SERVICE}",
+                                        "priority": "AVERAGE",
+                                        "description": "More than {$BROWSER.REQUESTS.FAILED.MAX} requests made by the browser failed in 5 minutes. The link opens the requests that fail, with the trace down to the backend service that failed.",
+                                        "url": "zabbix.php?action=apm.rum&tab=errors&filter_set=1&filter_app={$OTLP.NAMESPACE}",
+                                        "url_name": "APM real user monitoring",
+                                        "tags": [
+                                            {
+                                                "tag": "scope",
+                                                "value": "availability"
+                                            },
+                                            {
+                                                "tag": "service",
+                                                "value": "{#SERVICE}"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "otlp.browser.requests.get"
+                        },
+                        "lld_macro_paths": [
+                            {
+                                "lld_macro": "{#SERVICE}",
+                                "path": "$.service"
+                            },
+                            {
+                                "lld_macro": "{#HOST}",
+                                "path": "$.host"
+                            },
+                            {
+                                "lld_macro": "{#PATH}",
+                                "path": "$.path"
                             }
                         ]
                     }
